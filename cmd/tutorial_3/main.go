@@ -7,7 +7,7 @@ import (
 
 func main() {
 	var numerator = 10
-	var denominator = 20
+	var denominator = 0
 	quotient, remainder, err := integerDivision(numerator, denominator)
 
 	// if / else
