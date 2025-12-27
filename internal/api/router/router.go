@@ -50,11 +50,11 @@ func Route() *mux.Router {
 	r.HandleFunc("/games/{gameId}/score", GetGameScore).Methods("GET")
 	r.HandleFunc("/players/{playerId}/history", GetPlayerHistory).Methods("GET")
 
-	r.Use(loggingMiddleWare)
+	r.Use(loggingMiddleware)
 	return r
 }
 
-func loggingMiddleWare(next http.Handler) http.Handler {
+func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Info().
 			Str("method", req.Method).
@@ -69,7 +69,16 @@ func loggingMiddleWare(next http.Handler) http.Handler {
 		next.ServeHTTP(&lrw, req) //Since ResponseWriter is an interface -> Interfaces internally store a pointer to a concrete value. Since request is a struct, we must specifically pass in a pointer. See ServeHTTP arguments.
 
 		switch {
-		case lrw.responseCode == 200:
+		case 100 <= lrw.responseCode && lrw.responseCode < 200:
+			log.Info().
+				Str("method", req.Method).
+				Str("url", req.URL.String()).
+				Str("remote", req.RemoteAddr).
+				Int("responseCode", lrw.responseCode).
+				Dur("duration", time.Since(start)).
+				Msg("1xx informational response")
+
+		case 200 <= lrw.responseCode && lrw.responseCode < 300:
 			log.Info().
 				Str("method", req.Method).
 				Str("url", req.URL.String()).
@@ -78,7 +87,16 @@ func loggingMiddleWare(next http.Handler) http.Handler {
 				Dur("duration", time.Since(start)).
 				Msg("Success response")
 
-		case 400 < lrw.responseCode && lrw.responseCode < 500:
+		case 300 <= lrw.responseCode && lrw.responseCode < 400:
+			log.Info().
+				Str("method", req.Method).
+				Str("url", req.URL.String()).
+				Str("remote", req.RemoteAddr).
+				Int("responseCode", lrw.responseCode).
+				Dur("duration", time.Since(start)).
+				Msg("3xx redirection response")
+
+		case 400 <= lrw.responseCode && lrw.responseCode < 500:
 			log.Warn().
 				Str("method", req.Method).
 				Str("url", req.URL.String()).
@@ -86,7 +104,7 @@ func loggingMiddleWare(next http.Handler) http.Handler {
 				Int("responseCode", lrw.responseCode).
 				Dur("duration", time.Since(start)).
 				Msg("4xx response")
-		case 500 < lrw.responseCode && lrw.responseCode < 600:
+		case 500 <= lrw.responseCode && lrw.responseCode < 600:
 			log.Error().
 				Str("method", req.Method).
 				Str("url", req.URL.String()).
