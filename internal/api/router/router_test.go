@@ -80,7 +80,7 @@ func TestLoggingMiddleware_CapturesStatusCode(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	mw := loggingMiddleWare(handler)
+	mw := loggingMiddleware(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	rr := httptest.NewRecorder()
@@ -122,7 +122,7 @@ func TestLoggingResponseWriter_DefaultStatusCode(t *testing.T) {
 		w.Write([]byte("ok"))
 	})
 
-	mw := loggingMiddleWare(handler)
+	mw := loggingMiddleware(handler)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	rr := httptest.NewRecorder()
