@@ -2,6 +2,9 @@ package main
 
 import (
 	"flag"
+	"go-mighty/internal/api/router"
+	"net/http"
+	"os"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -9,6 +12,16 @@ import (
 
 func main() {
 	setupLogger()
+	setupRouter()
+}
+
+func setupRouter() {
+	r := router.Route()
+	err := http.ListenAndServe("localhost:8080", r)
+	if err != nil {
+		log.Fatal().Err(err).Msg("")
+		os.Exit(0)
+	}
 }
 
 func setupLogger() {
