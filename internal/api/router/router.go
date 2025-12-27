@@ -50,9 +50,6 @@ func Route() *mux.Router {
 	r.HandleFunc("/games/{gameId}/score", GetGameScore).Methods("GET")
 	r.HandleFunc("/players/{playerId}/history", GetPlayerHistory).Methods("GET")
 
-	// Attach router to default HTTP handler
-	http.Handle("/", r)
-
 	r.Use(loggingMiddleWare)
 	return r
 }
