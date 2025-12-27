@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
@@ -63,5 +64,49 @@ func loggingMiddleWare(next http.Handler) http.Handler {
 			Str("url", req.URL.String()).
 			Str("remote", req.RemoteAddr).
 			Msg("Incoming request")
+
+		lrw := LoggingResponseWriter{w, http.StatusOK}
+		start := time.Now()
+
+		// ResponseWriter interface uses pointer receivers for its methods. Therefore, we need to pass in a pointer.
+		next.ServeHTTP(&lrw, req) //Since ResponseWriter is an interface -> Interfaces internally store a pointer to a concrete value. Since request is a struct, we must specifically pass in a pointer. See ServeHTTP arguments.
+
+		switch {
+		case lrw.responseCode == 200:
+			log.Info().
+				Str("method", req.Method).
+				Str("url", req.URL.String()).
+				Str("remote", req.RemoteAddr).
+				Int("responseCode", lrw.responseCode).
+				Dur("duration", time.Since(start)).
+				Msg("Success response")
+
+		case 400 < lrw.responseCode && lrw.responseCode < 500:
+			log.Warn().
+				Str("method", req.Method).
+				Str("url", req.URL.String()).
+				Str("remote", req.RemoteAddr).
+				Int("responseCode", lrw.responseCode).
+				Dur("duration", time.Since(start)).
+				Msg("4xx response")
+		case 500 < lrw.responseCode && lrw.responseCode < 600:
+			log.Error().
+				Str("method", req.Method).
+				Str("url", req.URL.String()).
+				Str("remote", req.RemoteAddr).
+				Int("responseCode", lrw.responseCode).
+				Dur("duration", time.Since(start)).
+				Msg("5xx response")
+		}
 	})
+}
+
+type LoggingResponseWriter struct {
+	http.ResponseWriter //embedded Type in Go. We automatically inherit all the methods from ResponseWriter
+	responseCode        int
+}
+
+func (lrw *LoggingResponseWriter) WriteHeader(code int) {
+	lrw.responseCode = code              //save the http response
+	lrw.ResponseWriter.WriteHeader(code) //call the inherited WriteHeader
 }
