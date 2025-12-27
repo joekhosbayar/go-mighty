@@ -51,5 +51,17 @@ func Route() *mux.Router {
 
 	// Attach router to default HTTP handler
 	http.Handle("/", r)
+
+	r.Use(loggingMiddleWare)
 	return r
+}
+
+func loggingMiddleWare(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		log.Info().
+			Str("method", req.Method).
+			Str("url", req.URL.String()).
+			Str("remote", req.RemoteAddr).
+			Msg("Incoming request")
+	})
 }
