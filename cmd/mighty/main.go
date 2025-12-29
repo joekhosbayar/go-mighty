@@ -16,9 +16,9 @@ func main() {
 
 func setupRouter() {
 	r := router.Route()
-	err := http.ListenAndServe("localhost:8080", r)
+	err := http.ListenAndServe(":8080", r)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to start HTTP server")
+		log.Fatal().Err(err).Msg("failed to start HTTP server!")
 	}
 }
 
