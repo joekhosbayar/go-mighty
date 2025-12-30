@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -92,6 +93,23 @@ func (s *sqlRowAdapter) Scan(dest ...any) error {
 	return s.row.Scan(dest...)
 }
 
+// readSecret reads a secret from Docker secrets file or falls back to environment variable
+func readSecret(secretName string, envVarName string) string {
+	// Try to read from Docker secret file first
+	secretPath := fmt.Sprintf("/run/secrets/%s", secretName)
+	data, err := os.ReadFile(secretPath)
+	if err == nil {
+		log.Debug().Str("secret", secretName).Msg("Successfully read secret from Docker secrets file")
+		return strings.TrimSpace(string(data))
+	}
+	
+	// Log the reason for fallback (but don't log the actual error details for security)
+	log.Debug().Str("secret", secretName).Msg("Docker secret not found, using environment variable")
+	
+	// Fall back to environment variable
+	return os.Getenv(envVarName)
+}
+
 // ----------------------------
 // Constructor
 // ----------------------------
@@ -112,7 +130,7 @@ func ProvidePostgresClient() *PostgresClient {
 		user = "postgres"
 	}
 
-	password := os.Getenv("POSTGRES_PASSWORD")
+	password := readSecret("postgres_password", "POSTGRES_PASSWORD")
 	dbName := os.Getenv("POSTGRES_DB")
 	if dbName == "" {
 		dbName = "postgres"
