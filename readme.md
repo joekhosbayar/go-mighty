@@ -32,4 +32,8 @@ Note: The application uses Docker secrets for secure credential management. The 
 `go test ./...`
 
 # Note on Depends on field in docker yaml
-It only guarantees the postgres and redis containers are started before the API starts. Just because the postgres and redis containers are started doesn't always mean they are ready to accept traffic!! 
+It only guarantees the postgres and redis containers are started before the API starts. Just because the postgres and redis containers are started doesn't always mean they are ready to accept traffic!!
+
+# To reset secrets, need to run docker compose down -v
+`docker compose down -v`
+Otherwise the container will have an old secret cached.
