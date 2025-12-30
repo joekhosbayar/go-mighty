@@ -35,6 +35,17 @@ type PostgresClient struct {
 	db Database
 }
 
+func (p *PostgresClient) Close() error {
+	if p.db == nil {
+		return nil
+	}
+
+	if closer, ok := p.db.(interface{ Close() error }); ok && closer != nil {
+		return closer.Close()
+	}
+
+	return nil
+}
 func (p *PostgresClient) Ping(ctx context.Context) error {
 	return p.db.PingContext(ctx)
 }
