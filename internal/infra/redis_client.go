@@ -25,12 +25,12 @@ func (c *RedisClient) pingRedis(ctx context.Context) (string, error) {
 }
 
 func (c *RedisClient) SetVal(ctx context.Context, key string, val string, expiration time.Duration) error {
-	err := c.client.Set(context.Background(), key, val, expiration).Err()
+	err := c.client.Set(ctx, key, val, expiration).Err()
 	return err
 }
 
 func (c *RedisClient) GetVal(ctx context.Context, key string) (string, error) {
-	val, err := c.client.Get(context.Background(), key).Result()
+	val, err := c.client.Get(ctx, key).Result()
 	return val, err
 }
 
