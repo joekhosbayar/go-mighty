@@ -14,12 +14,6 @@ import (
 func main() {
 	setupLogger()
 	redisClient := infra.ProvideRedisClient()
-	err := redisClient.Set(context.Background(), "hello", "World", 0).Err()
-	if err != nil {
-		log.Fatal().Err(err).Msg("redis set err")
-	}
-	val := redisClient.Get(context.Background(), "hello")
-	log.Info().Msgf("redis get value: %v", val)
 	setupRouter()
 }
 
