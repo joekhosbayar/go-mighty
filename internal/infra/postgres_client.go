@@ -127,7 +127,11 @@ func ProvidePostgresClient() *PostgresClient {
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		host, port, user, password, dbName, sslMode,
 	)
-	log.Info().Msg(dsn)
+	safeDSN := fmt.Sprintf(
+		"host=%s port=%s user=%s dbname=%s sslmode=%s",
+		host, port, user, dbName, sslMode,
+	)
+	log.Info().Msg(safeDSN)
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
