@@ -7,5 +7,17 @@ services:
       REDIS_ADDR: "redis:6379"
       REDIS_PASSWORD: ""
       REDIS_DB: ""
+      POSTGRES_PASSWORD: mysecretpassword
+    depends_on:
+      - redis
+      - postgres   # Mighty will start after Redis and Postgres containers start
   redis:
     image: "redis:alpine"
+  postgres:
+    image: "postgres:16"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
