@@ -2,7 +2,8 @@ package infra
 
 import (
 	"context"
-	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -35,17 +36,28 @@ func (c *RedisClient) GetVal(ctx context.Context, key string) (string, error) {
 }
 
 func ProvideRedisClient() *RedisClient {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     "redis:6379",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
-	res, err := rdb.Ping(context.Background()).Result()
-	if err != nil {
-		log.Err(err).Msg("redis ping failed")
-	} else {
-		log.Info().Msg(fmt.Sprintf("redis ping success: %v", res))
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		addr = "redis:6379"
 	}
+
+	password := os.Getenv("REDIS_PASSWORD")
+
+	db := 0
+	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
+		if parsedDB, err := strconv.Atoi(dbStr); err != nil {
+			log.Error().Err(err).Msgf("Invalid REDIS_DB value %q, defaulting to 0", dbStr)
+		} else {
+			db = parsedDB
+		}
+	}
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Password: password,
+		DB:       db,
+	})
+
 	return &RedisClient{
 		client: rdb,
 	}
