@@ -42,7 +42,7 @@ func ProvideRedisClient() *RedisClient {
 	})
 	res, err := rdb.Ping(context.Background()).Result()
 	if err != nil {
-		log.Fatal().Err(err).Msg("redis ping failed")
+		log.Err(err).Msg("redis ping failed")
 	} else {
 		log.Info().Msg(fmt.Sprintf("redis ping success: %v", res))
 	}
