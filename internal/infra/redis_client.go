@@ -46,7 +46,7 @@ func ProvideRedisClient() *RedisClient {
 	db := 0
 	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
 		if parsedDB, err := strconv.Atoi(dbStr); err != nil {
-			log.Error().Msgf("Invalid REDIS_DB value %q, defaulting to 0: %s", dbStr, err.Error())
+			log.Error().Err(err).Msgf("Invalid REDIS_DB value %q, defaulting to 0", dbStr)
 		} else {
 			db = parsedDB
 		}
@@ -57,7 +57,7 @@ func ProvideRedisClient() *RedisClient {
 		Password: password,
 		DB:       db,
 	})
-	
+
 	return &RedisClient{
 		client: rdb,
 	}
