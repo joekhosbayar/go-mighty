@@ -97,9 +97,14 @@ func (s *sqlRowAdapter) Scan(dest ...any) error {
 func readSecret(secretName string, envVarName string) string {
 	// Try to read from Docker secret file first
 	secretPath := fmt.Sprintf("/run/secrets/%s", secretName)
-	if data, err := os.ReadFile(secretPath); err == nil {
+	data, err := os.ReadFile(secretPath)
+	if err == nil {
+		log.Debug().Str("secret", secretName).Msg("Successfully read secret from Docker secrets file")
 		return strings.TrimSpace(string(data))
 	}
+	
+	// Log the reason for fallback (but don't log the actual error details for security)
+	log.Debug().Str("secret", secretName).Msg("Docker secret not found, using environment variable")
 	
 	// Fall back to environment variable
 	return os.Getenv(envVarName)
