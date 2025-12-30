@@ -16,3 +16,6 @@
 
 # How to run API and Redis
 `docker compose up`
+
+# How to run all unit tests
+`go test ./...`
