@@ -16,7 +16,15 @@
 `docker run -p 8080:8080 mighty`
 
 # How to run API and Redis
-`docker compose up`
+1. Copy the `.env.example` file to `.env` and configure your environment variables:
+   ```
+   cp .env.example .env
+   ```
+2. Update the `.env` file with your desired configuration (especially `POSTGRES_PASSWORD`)
+3. Start the services:
+   ```
+   docker compose up
+   ```
 
 # How to run all unit tests
 `go test ./...`
