@@ -12,37 +12,78 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type PostgresClient struct {
-	db Database
+// ----------------------------
+// Interfaces
+// ----------------------------
+
+type Row interface {
+	Scan(dest ...any) error
 }
 
 type Database interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryRowContext(ctx context.Context, query string, args ...any) Row
 	PingContext(ctx context.Context) error
+}
+
+// ----------------------------
+// Postgres client
+// ----------------------------
+
+type PostgresClient struct {
+	db Database
 }
 
 func (p *PostgresClient) Ping(ctx context.Context) error {
 	return p.db.PingContext(ctx)
 }
 
-func (p *PostgresClient) Exec(
-	ctx context.Context,
-	query string,
-	args ...any,
-) error {
+func (p *PostgresClient) Exec(ctx context.Context, query string, args ...any) error {
 	_, err := p.db.ExecContext(ctx, query, args...)
 	return err
 }
 
-func (p *PostgresClient) QueryRow(
-	ctx context.Context,
-	query string,
-	args ...any,
-) *sql.Row {
+func (p *PostgresClient) QueryRow(ctx context.Context, query string, args ...any) Row {
 	return p.db.QueryRowContext(ctx, query, args...)
 }
+
+// ----------------------------
+// Real DB adapter
+// ----------------------------
+
+type realDatabase struct {
+	conn *sql.DB
+}
+
+func (r *realDatabase) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return r.conn.ExecContext(ctx, query, args...)
+}
+
+func (r *realDatabase) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return r.conn.QueryContext(ctx, query, args...)
+}
+
+func (r *realDatabase) QueryRowContext(ctx context.Context, query string, args ...any) Row {
+	return &sqlRowAdapter{row: r.conn.QueryRowContext(ctx, query, args...)}
+}
+
+func (r *realDatabase) PingContext(ctx context.Context) error {
+	return r.conn.PingContext(ctx)
+}
+
+// Adapter for *sql.Row to implement Row interface
+type sqlRowAdapter struct {
+	row *sql.Row
+}
+
+func (s *sqlRowAdapter) Scan(dest ...any) error {
+	return s.row.Scan(dest...)
+}
+
+// ----------------------------
+// Constructor
+// ----------------------------
 
 func ProvidePostgresClient() *PostgresClient {
 	host := os.Getenv("POSTGRES_HOST")
@@ -73,25 +114,20 @@ func ProvidePostgresClient() *PostgresClient {
 
 	dsn := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		host,
-		port,
-		user,
-		password,
-		dbName,
-		sslMode,
+		host, port, user, password, dbName, sslMode,
 	)
 	log.Info().Msg(dsn)
+
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to open postgres connection")
 	}
 
-	// Sensible pool defaults
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(25)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	return &PostgresClient{
-		db: db,
+		db: &realDatabase{conn: db},
 	}
 }
