@@ -57,12 +57,7 @@ func ProvideRedisClient() *RedisClient {
 		Password: password,
 		DB:       db,
 	})
-	res, err := rdb.Ping(context.Background()).Result()
-	if err != nil {
-		log.Err(err).Msg("redis ping failed")
-	} else {
-		log.Info().Msgf("redis ping success: %v", res)
-	}
+	
 	return &RedisClient{
 		client: rdb,
 	}
