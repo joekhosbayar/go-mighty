@@ -16,15 +16,17 @@
 `docker run -p 8080:8080 mighty`
 
 # How to run API and Redis
-1. Copy the `.env.example` file to `.env` and configure your environment variables:
+1. Set up the Docker secrets by creating the password file:
    ```
-   cp .env.example .env
+   cp secrets/postgres_password.txt.example secrets/postgres_password.txt
    ```
-2. Update the `.env` file with your desired configuration (especially `POSTGRES_PASSWORD`)
+2. Update `secrets/postgres_password.txt` with your secure password
 3. Start the services:
    ```
    docker compose up
    ```
+
+Note: The application uses Docker secrets for secure credential management. The password is read from `/run/secrets/postgres_password` inside the containers.
 
 # How to run all unit tests
 `go test ./...`

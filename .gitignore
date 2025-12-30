@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# Docker secrets
+secrets/*.txt
+
 # Build artifacts
 *.exe
 *.dll
