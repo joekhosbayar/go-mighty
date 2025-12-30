@@ -19,7 +19,7 @@ type ClientGetterSetter interface {
 	Get(ctx context.Context, key string) *redis.StringCmd
 }
 
-func (c *RedisClient) pingRedis(ctx context.Context) (string, error) {
+func (c *RedisClient) PingRedis(ctx context.Context) (string, error) {
 	pong, err := c.client.Ping(ctx).Result()
 	return pong, err
 }

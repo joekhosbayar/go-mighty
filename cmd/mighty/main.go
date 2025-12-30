@@ -14,6 +14,12 @@ import (
 func main() {
 	setupLogger()
 	redisClient := infra.ProvideRedisClient()
+	pong, err := redisClient.PingRedis(context.Background())
+	if err != nil {
+		log.Fatal().Err(err).Msg("Main method: redis ping failed")
+	}
+	log.Info().Str("Main method: pong", pong).Msg("redis ping success")
+
 	setupRouter()
 }
 
