@@ -25,6 +25,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Main method: postgres ping failed")
 	}
+	log.Info().Msg("Main method: postgres ping success")
 
 	setupRouter()
 }
