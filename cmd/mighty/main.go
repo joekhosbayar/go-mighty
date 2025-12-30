@@ -20,6 +20,12 @@ func main() {
 	}
 	log.Info().Str("Main method: pong", pong).Msg("redis ping success")
 
+	postgresClient := infra.ProvidePostgresClient()
+	err = postgresClient.Ping(context.Background())
+	if err != nil {
+		log.Fatal().Err(err).Msg("Main method: postgres ping failed")
+	}
+
 	setupRouter()
 }
 
