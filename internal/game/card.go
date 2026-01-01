@@ -109,13 +109,13 @@ func ParseCard(s string) (Card, error) {
 		rank = Nine
 	case string(Ten):
 		rank = Ten
-	case string(Jack):
+	case string(Jack), "j":
 		rank = Jack
-	case string(Queen):
+	case string(Queen), "q":
 		rank = Queen
-	case string(King):
+	case string(King), "k":
 		rank = King
-	case string(Ace):
+	case string(Ace), "a":
 		rank = Ace
 	default:
 		return Card{}, fmt.Errorf("invalid rank: %s", rankStr)
