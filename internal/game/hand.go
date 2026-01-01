@@ -171,29 +171,28 @@ func (h *Hand) Discard(cards []Card) error {
 	// Verify cards are in declarer's hand and remove them
 	declarerHand := h.PlayerHands[h.DeclarerSeat]
 	
-	// Build a new hand excluding the discarded cards
-	newHand := make([]Card, 0)
-	cardsToDiscard := make(map[string]bool)
-	
-	// Mark cards to discard
+	// Count how many of each card needs to be discarded
+	cardsToDiscard := make(map[string]int)
 	for _, card := range cards {
-		cardsToDiscard[card.String()] = true
+		cardsToDiscard[card.String()]++
 	}
 	
-	// Verify all cards to discard are in hand
-	discardedCount := 0
+	// Build a new hand excluding the discarded cards
+	newHand := make([]Card, 0)
 	for _, handCard := range declarerHand {
-		if cardsToDiscard[handCard.String()] && discardedCount < len(cards) {
-			discardedCount++
-			delete(cardsToDiscard, handCard.String())
+		cardKey := handCard.String()
+		if count, exists := cardsToDiscard[cardKey]; exists && count > 0 {
+			cardsToDiscard[cardKey]--
 		} else {
 			newHand = append(newHand, handCard)
 		}
 	}
 	
-	// Check if all cards were found
-	if len(cardsToDiscard) > 0 {
-		return ErrCardNotInHand
+	// Check if all cards were found (any remaining count > 0 means card wasn't in hand)
+	for _, count := range cardsToDiscard {
+		if count > 0 {
+			return ErrCardNotInHand
+		}
 	}
 
 	h.PlayerHands[h.DeclarerSeat] = newHand
@@ -263,19 +262,19 @@ func (h *Hand) PlayCard(seatNo int, card Card, numPlayers int) error {
 	// Remove card from hand
 	h.PlayerHands[seatNo] = append(playerHand[:cardIndex], playerHand[cardIndex+1:]...)
 
-	// Add to trick
-	h.CurrentTrick.AddCard(seatNo, card)
-
-	// Check for Ripper and Joker interaction
+	// Check for Ripper and Joker interaction before adding card
 	if h.Contract != nil && card.IsRipper(h.Contract.Trump.Suit) {
 		h.RipperPlayed = true
 		// When the Ripper is led, it forces the Joker to be played and removes its power.
 		// Detect that the Ripper was led by checking that this seat is the leader and
 		// that this is the first card in the trick.
-		if seatNo == h.CurrentTrick.LeaderSeat && len(h.CurrentTrick.Cards) == 1 {
+		if seatNo == h.CurrentTrick.LeaderSeat && len(h.CurrentTrick.Cards) == 0 {
 			h.JokerRipped = true
 		}
 	}
+
+	// Add to trick
+	h.CurrentTrick.AddCard(seatNo, card)
 
 	return nil
 }
