@@ -1,3 +1,6 @@
+# Mighty Backend Design
+<img width="1000" height="685" alt="image" src="https://github.com/user-attachments/assets/15bd4c43-02a8-4dfc-9ccc-78e47b78ae9b" />
+
 # Stuff i did
 `go get -u github.com/rs/zerolog/log`
 `go get github.com/redis/go-redis/v9`
