@@ -39,12 +39,30 @@ type Card struct {
 	Rank Rank `json:"rank"`
 }
 
+// Abbreviation returns the single-letter abbreviation for the suit.
+func (s Suit) Abbreviation() string {
+	switch s {
+	case Spades:
+		return "S"
+	case Hearts:
+		return "H"
+	case Diamonds:
+		return "D"
+	case Clubs:
+		return "C"
+	case NoSuit:
+		return "J"
+	default:
+		return ""
+	}
+}
+
 // String returns a string representation of the card (e.g., "SA", "H10", "JOKER")
 func (c Card) String() string {
 	if c.Rank == Joker {
 		return "JOKER"
 	}
-	return string(c.Suit[0:1]) + string(c.Rank)
+	return c.Suit.Abbreviation() + string(c.Rank)
 }
 
 // ParseCard converts a string like "SA", "H10", "JOKER" into a Card
@@ -70,7 +88,39 @@ func ParseCard(s string) (Card, error) {
 		return Card{}, fmt.Errorf("invalid suit: %c", s[0])
 	}
 
-	rank := Rank(s[1:])
+	rankStr := s[1:]
+	var rank Rank
+	switch rankStr {
+	case string(Two):
+		rank = Two
+	case string(Three):
+		rank = Three
+	case string(Four):
+		rank = Four
+	case string(Five):
+		rank = Five
+	case string(Six):
+		rank = Six
+	case string(Seven):
+		rank = Seven
+	case string(Eight):
+		rank = Eight
+	case string(Nine):
+		rank = Nine
+	case string(Ten):
+		rank = Ten
+	case string(Jack):
+		rank = Jack
+	case string(Queen):
+		rank = Queen
+	case string(King):
+		rank = King
+	case string(Ace):
+		rank = Ace
+	default:
+		return Card{}, fmt.Errorf("invalid rank: %s", rankStr)
+	}
+
 	return Card{Suit: suit, Rank: rank}, nil
 }
 
