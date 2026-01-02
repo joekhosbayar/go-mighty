@@ -170,22 +170,32 @@ func (h *Hand) Discard(cards []Card) error {
 
 	// Verify cards are in declarer's hand and remove them
 	declarerHand := h.PlayerHands[h.DeclarerSeat]
+	
+	// Count how many of each card needs to be discarded
+	cardsToDiscard := make(map[string]int)
 	for _, card := range cards {
-		found := false
-		for i, handCard := range declarerHand {
-			if handCard.Equals(card) {
-				// Remove card
-				declarerHand = append(declarerHand[:i], declarerHand[i+1:]...)
-				found = true
-				break
-			}
+		cardsToDiscard[card.String()]++
+	}
+	
+	// Build a new hand excluding the discarded cards
+	newHand := make([]Card, 0)
+	for _, handCard := range declarerHand {
+		cardKey := handCard.String()
+		if count, exists := cardsToDiscard[cardKey]; exists && count > 0 {
+			cardsToDiscard[cardKey]--
+		} else {
+			newHand = append(newHand, handCard)
 		}
-		if !found {
+	}
+	
+	// Check if all cards were found (any remaining count > 0 means card wasn't in hand)
+	for _, count := range cardsToDiscard {
+		if count > 0 {
 			return ErrCardNotInHand
 		}
 	}
 
-	h.PlayerHands[h.DeclarerSeat] = declarerHand
+	h.PlayerHands[h.DeclarerSeat] = newHand
 	h.Discarded = cards
 	h.Phase = PhaseCallingPartner
 
@@ -252,13 +262,19 @@ func (h *Hand) PlayCard(seatNo int, card Card, numPlayers int) error {
 	// Remove card from hand
 	h.PlayerHands[seatNo] = append(playerHand[:cardIndex], playerHand[cardIndex+1:]...)
 
-	// Add to trick
-	h.CurrentTrick.AddCard(seatNo, card)
-
-	// Check for Ripper and Joker interaction
+	// Check for Ripper and Joker interaction before adding card
 	if h.Contract != nil && card.IsRipper(h.Contract.Trump.Suit) {
 		h.RipperPlayed = true
+		// When the Ripper is led, it forces the Joker to be played and removes its power.
+		// Detect that the Ripper was led by checking that this seat is the leader and
+		// that this is the first card in the trick.
+		if seatNo == h.CurrentTrick.LeaderSeat && len(h.CurrentTrick.Cards) == 0 {
+			h.JokerRipped = true
+		}
 	}
+
+	// Add to trick
+	h.CurrentTrick.AddCard(seatNo, card)
 
 	return nil
 }
@@ -334,7 +350,7 @@ func (h *Hand) BeatsCard(card1, card2 Card, trick *Trick, trump Suit) bool {
 
 	// Joker beats everything except Mighty (unless ripped)
 	if card1.IsJoker() {
-		return !h.JokerRipped || !h.RipperPlayed
+		return !h.JokerRipped
 	}
 	if card2.IsJoker() {
 		return false

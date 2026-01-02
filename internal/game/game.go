@@ -300,18 +300,33 @@ func (g *Game) UpdatePlayerRole(seatNo int) PlayerRole {
 		return RoleUndecided
 	}
 
+	// Declarer is always known
 	if seatNo == g.CurrentHand.DeclarerSeat {
 		return RoleDeclarer
 	}
 
-	if g.CurrentHand.PartnerRevealed && seatNo == g.CurrentHand.PartnerSeat {
-		return RolePartner
+	// If the partner has been revealed, their role is fixed and
+	// all other non-declarer seats are opponents.
+	if g.CurrentHand.PartnerRevealed {
+		if seatNo == g.CurrentHand.PartnerSeat {
+			return RolePartner
+		}
+		return RoleOpponent
 	}
 
+	// No-friend contracts have only the declarer on the declaring side.
 	if g.CurrentHand.Contract != nil && g.CurrentHand.Contract.NoFriend {
 		return RoleOpponent
 	}
 
+	// If the hand is complete and no partner was revealed, all
+	// non-declarer seats must be opponents rather than undecided.
+	if g.CurrentHand.IsComplete() {
+		return RoleOpponent
+	}
+
+	// Hand in progress, friend contract, partner not yet revealed:
+	// role is still undecided for non-declarers.
 	return RoleUndecided
 }
 
