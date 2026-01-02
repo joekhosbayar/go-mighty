@@ -1,0 +1,27 @@
+@startuml
+title Mighty Game Move Flow
+
+actor Player
+participant Gateway
+participant API
+participant "Redis\n(Game State)" as Redis
+participant "PostgreSQL\n(Moves / Ledger)" as Postgres
+
+Player -> Gateway : sendMove(move, client_version)
+Gateway -> API : forwardMove(move, client_version)
+API -> Redis : checkCurrentVersion(game_id)
+Redis --> API : current_version
+API -> API : validateMove(move, client_version)
+alt move is valid
+    API -> Postgres : insertMove(game_id, player_id, move, version)
+    Postgres --> API : move_saved
+    API -> Redis : updateGameState(game_id, move)
+    Redis --> API : state_updated
+    API -> Redis : publishEvent(game_id, event)
+    Redis --> Gateway : event_fanout
+    Gateway --> Player : broadcastMove(event)
+else move is stale
+    API --> Gateway : rejectMove(reason="stale version")
+    Gateway --> Player : rejectMove(event)
+end
+@enduml
