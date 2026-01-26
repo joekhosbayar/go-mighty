@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
+	"github.com/rs/zerolog/log"
 )
 
 type Handler struct {
@@ -143,4 +145,51 @@ func (h *Handler) GetGameHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(g)
+}
+
+func LoggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		log.Info().
+			Str("method", req.Method).
+			Str("url", req.URL.String()).
+			Str("remote", req.RemoteAddr).
+			Msg("Incoming request")
+
+		lrw := &LoggingResponseWriter{ResponseWriter: w, responseCode: http.StatusOK}
+		start := time.Now()
+
+		next.ServeHTTP(lrw, req)
+
+		event := log.Info()
+		msg := "Success response"
+		if lrw.responseCode >= 400 && lrw.responseCode < 500 {
+			event = log.Warn()
+			msg = "4xx response"
+		} else if lrw.responseCode >= 500 {
+			event = log.Error()
+			msg = "5xx response"
+		} else if lrw.responseCode >= 300 && lrw.responseCode < 400 {
+			msg = "3xx redirection response"
+		} else if lrw.responseCode >= 100 && lrw.responseCode < 200 {
+			msg = "1xx informational response"
+		}
+
+		event.
+			Str("method", req.Method).
+			Str("url", req.URL.String()).
+			Str("remote", req.RemoteAddr).
+			Int("responseCode", lrw.responseCode).
+			Dur("duration", time.Since(start)).
+			Msg(msg)
+	})
+}
+
+type LoggingResponseWriter struct {
+	http.ResponseWriter
+	responseCode int
+}
+
+func (lrw *LoggingResponseWriter) WriteHeader(code int) {
+	lrw.responseCode = code
+	lrw.ResponseWriter.WriteHeader(code)
 }
