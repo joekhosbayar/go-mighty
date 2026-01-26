@@ -43,7 +43,8 @@ func (s *GameService) CreateGame(ctx context.Context, id string) (*game.GameStat
 // JoinGame handles player joining
 func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName string, seat int) (*game.GameState, error) {
 	// Lock
-	if _, err := s.redisStore.AcquireLock(ctx, gameID); err != nil {
+	_, err := s.redisStore.AcquireLock(ctx, gameID)
+	if err != nil {
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
 	defer s.redisStore.ReleaseLock(ctx, gameID)
@@ -80,7 +81,9 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 
 	// Save Move to Postgres (Join is a move?)
 	// Architecture says "Inserts join move to Postgres ledger".
-	s.postgresStore.SaveMove(ctx, "join", playerID, seat, g.Version, map[string]interface{}{"name": playerName}, gameID)
+	if err := s.postgresStore.SaveMove(ctx, "join", playerID, seat, g.Version, g.Version-1, map[string]interface{}{"name": playerName}, gameID); err != nil {
+		return nil, fmt.Errorf("failed to save join move in db: %w", err)
+	}
 
 	// Publish
 	s.redisStore.PublishEvent(ctx, gameID, map[string]interface{}{
@@ -95,13 +98,15 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 // ProcessMove handles game moves
 func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.GameState, error) {
 	// 1. Lock
-	if _, err := s.redisStore.AcquireLock(ctx, gameID); err != nil {
+	_, err := s.redisStore.AcquireLock(ctx, gameID)
+	if err != nil {
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
 	defer s.redisStore.ReleaseLock(ctx, gameID)
 
 	// 2. Check Version
-	err := s.redisStore.CheckVersion(ctx, gameID, clientVersion)
+	// Reuse err variable for subsequent operations
+	err = s.redisStore.CheckVersion(ctx, gameID, clientVersion)
 	if err != nil {
 		return nil, err // Returns stale version error
 	}
@@ -137,7 +142,9 @@ func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, 
 	if p != nil {
 		seat = p.Seat
 	}
-	s.postgresStore.SaveMove(ctx, moveType, playerID, seat, g.Version, payload, gameID)
+	if err := s.postgresStore.SaveMove(ctx, moveType, playerID, seat, g.Version, clientVersion, payload, gameID); err != nil {
+		return nil, fmt.Errorf("failed to save move in db: %w", err)
+	}
 
 	// 8. Publish
 	s.redisStore.PublishEvent(ctx, gameID, map[string]interface{}{

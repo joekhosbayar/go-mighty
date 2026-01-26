@@ -3,7 +3,6 @@ package game
 import (
 	"fmt"
 	"math/rand"
-	"time"
 )
 
 // Suit represents the card suit
@@ -21,21 +20,20 @@ const (
 type Rank string
 
 const (
-	Ace    Rank = "A"
-	King   Rank = "K"
-	Queen  Rank = "Q"
-	Jack   Rank = "J"
-	Ten    Rank = "10"
-	Nine   Rank = "9"
-	Eight  Rank = "8"
-	Seven  Rank = "7"
-	Six    Rank = "6"
-	Five   Rank = "5"
-	Four   Rank = "4"
-	Three  Rank = "3"
-	Two    Rank = "2"
-	LJoker Rank = "L" // Little/Color Joker? Mighty usually has only one Joker.
-	// In Mighty, there is typically one Joker. We will use "Joker" as Rank.
+	Ace   Rank = "A"
+	King  Rank = "K"
+	Queen Rank = "Q"
+	Jack  Rank = "J"
+	Ten   Rank = "10"
+	Nine  Rank = "9"
+	Eight Rank = "8"
+	Seven Rank = "7"
+	Six   Rank = "6"
+	Five  Rank = "5"
+	Four  Rank = "4"
+	Three Rank = "3"
+	Two   Rank = "2"
+	// In Mighty, there is typically one Joker. We will use "Joker" as the only Joker rank.
 	Joker Rank = "Joker"
 )
 
@@ -49,7 +47,12 @@ func (c Card) String() string {
 	if c.Rank == Joker {
 		return "Joker"
 	}
-	return fmt.Sprintf("%s%s", string(c.Suit)[0:1], c.Rank) // e.g. S-A -> SA
+	s := string(c.Suit)
+	prefix := ""
+	if len(s) > 0 {
+		prefix = s[:1]
+	}
+	return fmt.Sprintf("%s%s", prefix, c.Rank) // e.g. S-A -> SA
 }
 
 // IsPointCard checks if the card is a point card (A, K, Q, J, 10)
@@ -81,7 +84,6 @@ func NewDeck() Deck {
 
 // Shuffle shuffles the deck
 func (d Deck) Shuffle() {
-	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(d), func(i, j int) {
 		d[i], d[j] = d[j], d[i]
 	})

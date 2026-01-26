@@ -28,3 +28,6 @@ CREATE TABLE moves (
 );
 
 CREATE INDEX idx_moves_game_id ON moves(game_id);
+CREATE INDEX idx_moves_player_id ON moves(player_id);
+CREATE INDEX idx_games_status ON games(status);
+CREATE INDEX idx_hands_game_id_hand_no ON hands(game_id, hand_no);
