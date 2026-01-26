@@ -1,0 +1,1 @@
+```docker run -p 8080:8080 -e SWAGGER_JSON=/spec/openapi.yaml -v /Users/joekhosbayar/Development/go-mighty/docs:/spec docker.swagger.io/swaggerapi/swagger-ui```

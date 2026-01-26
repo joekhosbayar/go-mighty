@@ -1,0 +1,331 @@
+openapi: 3.0.3
+info:
+  title: Mighty Game API
+  description: API for the automated Mighty card game backend.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+paths:
+  /games:
+    post:
+      summary: Create a new game
+      operationId: createGame
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                  description: Optional custom ID for the game. If empty, one will be generated.
+                  example: "game-123"
+      responses:
+        '200':
+          description: Game created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Game'
+        '400':
+          description: Invalid request
+        '500':
+          description: Internal server error
+
+  /games/{id}:
+    get:
+      summary: Get game state
+      operationId: getGame
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The game ID
+      responses:
+        '200':
+          description: Current game state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Game'
+        '404':
+          description: Game not found
+
+  /games/{id}/join:
+    post:
+      summary: Join a game
+      operationId: joinGame
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The game ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - player_id
+                - name
+                - seat
+              properties:
+                player_id:
+                  type: string
+                  description: Unique identifier for the player
+                name:
+                  type: string
+                  description: Display name of the player
+                seat:
+                  type: integer
+                  description: Desired seat index (0-4)
+                  minimum: 0
+                  maximum: 4
+      responses:
+        '200':
+          description: Player joined successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Game'
+        '400':
+          description: Invalid request or seat taken
+        '500':
+          description: Internal server error
+
+  /games/{id}/move:
+    post:
+      summary: Submit a move
+      operationId: submitMove
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The game ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - player_id
+                - move_type
+              properties:
+                player_id:
+                  type: string
+                move_type:
+                  $ref: '#/components/schemas/MoveType'
+                client_version:
+                  type: integer
+                  description: The game version the client believes it is acting on (for optimistic concurrency control)
+                payload:
+                  description: The payload depends on the move_type.
+                  oneOf:
+                    - $ref: '#/components/schemas/Bid'
+                    - type: array
+                      items:
+                        $ref: '#/components/schemas/Card'
+                      description: For discard move (array of 3 cards)
+                    - $ref: '#/components/schemas/Card'
+                  discriminator:
+                    propertyName: move_type
+                    mapping:
+                      bid: '#/components/schemas/Bid'
+                      discard: '#/components/schemas/DiscardPayload'
+                      call_partner: '#/components/schemas/Card'
+                      play_card: '#/components/schemas/Card'
+      responses:
+        '200':
+          description: Move accepted, returns updated game state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Game'
+        '400':
+          description: Invalid move or request
+
+  /games/{id}/ws:
+    get:
+      summary: WebSocket connection for game updates
+      operationId: connectWS
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The game ID
+      responses:
+        '101':
+          description: Switching Protocols to WebSocket. The connection will receive JSON Game objects upon updates.
+
+components:
+  schemas:
+    Game:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/Phase'
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+          minItems: 5
+          maxItems: 5
+        kitty:
+          type: array
+          items:
+            $ref: '#/components/schemas/Card'
+          description: The 3 cards in the kitty (usually hidden until end or for declarer)
+        current_turn:
+          type: integer
+          description: Seat index (0-4) whose turn it is
+        dealer:
+          type: integer
+          description: Seat index (0-4) of the dealer
+        bids:
+          type: array
+          items:
+            $ref: '#/components/schemas/Bid'
+        current_bid:
+          $ref: '#/components/schemas/Bid'
+        declarer:
+          type: integer
+          description: Seat index (0-4) of the declarer, -1 if none
+        passed_players:
+          type: object
+          additionalProperties:
+            type: boolean
+          description: Map of seat index to boolean indicating if they passed.
+        contract:
+          $ref: '#/components/schemas/Bid'
+        partner_card:
+          $ref: '#/components/schemas/Card'
+        partner_seat:
+          type: integer
+          description: Seat index of the partner, -1 if unknown
+        is_no_friend:
+          type: boolean
+        trump:
+          $ref: '#/components/schemas/Suit'
+        tricks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Trick'
+        scores:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Accumulated scores by player ID (or team?)
+        version:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Player:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        seat:
+          type: integer
+        hand:
+          type: array
+          items:
+            $ref: '#/components/schemas/Card'
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/Card'
+          description: Point cards collected by this player
+        is_connected:
+          type: boolean
+
+    Card:
+      type: object
+      required:
+        - suit
+        - rank
+      properties:
+        suit:
+          $ref: '#/components/schemas/Suit'
+        rank:
+          $ref: '#/components/schemas/Rank'
+
+    Suit:
+      type: string
+      enum: [spades, diamonds, hearts, clubs, none]
+
+    Rank:
+      type: string
+      enum: ["A", "K", "Q", "J", "10", "9", "8", "7", "6", "5", "4", "3", "2", "Joker"]
+
+    Phase:
+      type: string
+      enum: [waiting, bidding, exchanging, calling, playing, finished]
+
+    MoveType:
+      type: string
+      enum: [bid, pass, discard, call_partner, play_card]
+
+    Bid:
+      type: object
+      properties:
+        player_id:
+          type: string
+        points:
+          type: integer
+        suit:
+          $ref: '#/components/schemas/Suit'
+        is_no_trump:
+          type: boolean
+
+    Trick:
+      type: object
+      properties:
+        cards:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlayedCard'
+        lead_suit:
+          $ref: '#/components/schemas/Suit'
+        winner:
+          type: integer
+          description: Seat index of the winner of this trick
+
+    PlayedCard:
+      type: object
+      properties:
+        player_id:
+          type: string
+        seat:
+          type: integer
+        card:
+          $ref: '#/components/schemas/Card'
+
+    DiscardPayload:
+      type: array
+      items:
+        $ref: '#/components/schemas/Card'
+      minItems: 3
+      maxItems: 3
