@@ -1,36 +1,40 @@
 package game
 
-import "fmt"
+import (
+	"fmt"
+	"math/rand"
+)
 
-// Suit represents the four card suits plus Joker
+// Suit represents the card suit
 type Suit string
 
 const (
 	Spades   Suit = "spades"
-	Hearts   Suit = "hearts"
 	Diamonds Suit = "diamonds"
+	Hearts   Suit = "hearts"
 	Clubs    Suit = "clubs"
-	NoSuit   Suit = "joker" // for Joker card
+	None     Suit = "none" // For Joker
 )
 
-// Rank represents card ranks from 2 to Ace plus Joker
+// Rank represents the card rank
 type Rank string
 
 const (
-	Two   Rank = "2"
-	Three Rank = "3"
-	Four  Rank = "4"
-	Five  Rank = "5"
-	Six   Rank = "6"
-	Seven Rank = "7"
-	Eight Rank = "8"
-	Nine  Rank = "9"
-	Ten   Rank = "10"
-	Jack  Rank = "J"
-	Queen Rank = "Q"
-	King  Rank = "K"
 	Ace   Rank = "A"
-	Joker Rank = "JOKER"
+	King  Rank = "K"
+	Queen Rank = "Q"
+	Jack  Rank = "J"
+	Ten   Rank = "10"
+	Nine  Rank = "9"
+	Eight Rank = "8"
+	Seven Rank = "7"
+	Six   Rank = "6"
+	Five  Rank = "5"
+	Four  Rank = "4"
+	Three Rank = "3"
+	Two   Rank = "2"
+	// In Mighty, there is typically one Joker. We will use "Joker" as the only Joker rank.
+	Joker Rank = "Joker"
 )
 
 // Card represents a playing card
@@ -39,164 +43,79 @@ type Card struct {
 	Rank Rank `json:"rank"`
 }
 
-// Abbreviation returns the single-letter abbreviation for the suit.
-func (s Suit) Abbreviation() string {
-	switch s {
-	case Spades:
-		return "S"
-	case Hearts:
-		return "H"
-	case Diamonds:
-		return "D"
-	case Clubs:
-		return "C"
-	case NoSuit:
-		return "J"
-	default:
-		return ""
-	}
-}
-
-// String returns a string representation of the card (e.g., "SA", "H10", "JOKER")
 func (c Card) String() string {
 	if c.Rank == Joker {
-		return "JOKER"
+		return "Joker"
 	}
-	return c.Suit.Abbreviation() + string(c.Rank)
+	s := string(c.Suit)
+	prefix := ""
+	if len(s) > 0 {
+		prefix = s[:1]
+	}
+	return fmt.Sprintf("%s%s", prefix, c.Rank) // e.g. S-A -> SA
 }
 
-// ParseCard converts a string like "SA", "H10", "JOKER" into a Card
-func ParseCard(s string) (Card, error) {
-	if s == "JOKER" {
-		return Card{Suit: NoSuit, Rank: Joker}, nil
-	}
-	if len(s) < 2 {
-		return Card{}, fmt.Errorf("invalid card string: %s", s)
-	}
-
-	var suit Suit
-	switch s[0] {
-	case 'S', 's':
-		suit = Spades
-	case 'H', 'h':
-		suit = Hearts
-	case 'D', 'd':
-		suit = Diamonds
-	case 'C', 'c':
-		suit = Clubs
-	default:
-		return Card{}, fmt.Errorf("invalid suit: %c", s[0])
-	}
-
-	rankStr := s[1:]
-	var rank Rank
-	switch rankStr {
-	case string(Two):
-		rank = Two
-	case string(Three):
-		rank = Three
-	case string(Four):
-		rank = Four
-	case string(Five):
-		rank = Five
-	case string(Six):
-		rank = Six
-	case string(Seven):
-		rank = Seven
-	case string(Eight):
-		rank = Eight
-	case string(Nine):
-		rank = Nine
-	case string(Ten):
-		rank = Ten
-	case string(Jack), "j":
-		rank = Jack
-	case string(Queen), "q":
-		rank = Queen
-	case string(King), "k":
-		rank = King
-	case string(Ace), "a":
-		rank = Ace
-	default:
-		return Card{}, fmt.Errorf("invalid rank: %s", rankStr)
-	}
-
-	return Card{Suit: suit, Rank: rank}, nil
-}
-
-// PointValue returns the point value of the card (A, K, Q, J, 10 = 1 point)
-func (c Card) PointValue() int {
+// IsPointCard checks if the card is a point card (A, K, Q, J, 10)
+func (c Card) IsPointCard() bool {
 	switch c.Rank {
 	case Ace, King, Queen, Jack, Ten:
-		return 1
-	default:
-		return 0
+		return true
 	}
+	return false
 }
 
-// IsMighty checks if the card is the Mighty (SA unless spades are trump, then DA)
-func (c Card) IsMighty(trump Suit) bool {
-	if trump == Spades {
-		return c.Suit == Diamonds && c.Rank == Ace
+// Deck represents a deck of cards
+type Deck []Card
+
+// NewDeck creates a standard 53-card deck (52 + 1 Joker)
+func NewDeck() Deck {
+	suits := []Suit{Spades, Diamonds, Hearts, Clubs}
+	ranks := []Rank{Ace, King, Queen, Jack, Ten, Nine, Eight, Seven, Six, Five, Four, Three, Two}
+
+	deck := make(Deck, 0, 53)
+	for _, s := range suits {
+		for _, r := range ranks {
+			deck = append(deck, Card{Suit: s, Rank: r})
+		}
 	}
-	return c.Suit == Spades && c.Rank == Ace
+	deck = append(deck, Card{Suit: None, Rank: Joker})
+	return deck
 }
 
-// IsJoker checks if the card is the Joker
-func (c Card) IsJoker() bool {
-	return c.Rank == Joker
+// Shuffle shuffles the deck
+func (d Deck) Shuffle() {
+	rand.Shuffle(len(d), func(i, j int) {
+		d[i], d[j] = d[j], d[i]
+	})
 }
 
-// IsRipper checks if the card is the Ripper (C3 unless clubs are trump, then S3)
-func (c Card) IsRipper(trump Suit) bool {
-	if trump == Clubs {
-		return c.Suit == Spades && c.Rank == Three
+// Deal distributed cards to 5 players (10 each) and kitty (3)
+// Returns 5 hands and the kitty
+func (d Deck) Deal() ([5][]Card, []Card) {
+	if len(d) != 53 {
+		// Should unlikely happen if fresh deck
+		return [5][]Card{}, nil
 	}
-	return c.Suit == Clubs && c.Rank == Three
-}
 
-// IsMagicCard checks if the card is Mighty or Joker
-func (c Card) IsMagicCard(trump Suit) bool {
-	return c.IsMighty(trump) || c.IsJoker()
-}
+	hands := [5][]Card{}
+	// Mighty dealing: 1 -> 2 -> 3 -> 4 is common, or just purely random.
+	// We'll just deal sequentially for simplicity as shuffle is random.
 
-// RankValue returns numeric value for rank comparison (higher is better)
-func (c Card) RankValue() int {
-	switch c.Rank {
-	case Two:
-		return 2
-	case Three:
-		return 3
-	case Four:
-		return 4
-	case Five:
-		return 5
-	case Six:
-		return 6
-	case Seven:
-		return 7
-	case Eight:
-		return 8
-	case Nine:
-		return 9
-	case Ten:
-		return 10
-	case Jack:
-		return 11
-	case Queen:
-		return 12
-	case King:
-		return 13
-	case Ace:
-		return 14
-	case Joker:
-		return 15
-	default:
-		return 0
+	// Implementation:
+	// Players 0-4 get 10 cards each. Top 50 cards used.
+	// Last 3 cards go to kitty.
+
+	// Actually, let's just slice it.
+	k := 0
+	for i := 0; i < 5; i++ {
+		hands[i] = make([]Card, 10)
+		for j := 0; j < 10; j++ {
+			hands[i][j] = d[k]
+			k++
+		}
 	}
-}
+	kitty := make([]Card, 3)
+	copy(kitty, d[50:])
 
-// Equals checks if two cards are equal
-func (c Card) Equals(other Card) bool {
-	return c.Suit == other.Suit && c.Rank == other.Rank
+	return hands, kitty
 }
