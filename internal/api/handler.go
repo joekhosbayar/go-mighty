@@ -194,8 +194,8 @@ func (lrw *LoggingResponseWriter) WriteHeader(code int) {
 	if !lrw.wroteHeader {
 		lrw.responseCode = code
 		lrw.wroteHeader = true
+		lrw.ResponseWriter.WriteHeader(code)
 	}
-	lrw.ResponseWriter.WriteHeader(code)
 }
 
 func (lrw *LoggingResponseWriter) Write(b []byte) (int, error) {
