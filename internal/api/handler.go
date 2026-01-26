@@ -155,7 +155,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			Str("remote", req.RemoteAddr).
 			Msg("Incoming request")
 
-		lrw := &LoggingResponseWriter{ResponseWriter: w, responseCode: http.StatusOK}
+		lrw := &LoggingResponseWriter{ResponseWriter: w}
 		start := time.Now()
 
 		next.ServeHTTP(lrw, req)
@@ -187,9 +187,18 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 type LoggingResponseWriter struct {
 	http.ResponseWriter
 	responseCode int
+	wroteHeader  bool
 }
 
 func (lrw *LoggingResponseWriter) WriteHeader(code int) {
 	lrw.responseCode = code
+	lrw.wroteHeader = true
 	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (lrw *LoggingResponseWriter) Write(b []byte) (int, error) {
+	if !lrw.wroteHeader {
+		lrw.WriteHeader(http.StatusOK)
+	}
+	return lrw.ResponseWriter.Write(b)
 }
