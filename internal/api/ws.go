@@ -22,6 +22,9 @@ var upgrader = websocket.Upgrader{
 		}
 
 		// Only allow requests from the same host.
+		// Note: This doesn't validate scheme (http vs https) or port to allow
+		// flexible development environments. For production, consider using
+		// environment-specific allowlists of trusted origins.
 		return u.Host == r.Host
 	},
 }
