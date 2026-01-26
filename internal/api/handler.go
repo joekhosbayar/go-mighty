@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
+	"github.com/rs/zerolog/log"
 )
 
 type Handler struct {
@@ -143,4 +145,69 @@ func (h *Handler) GetGameHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(g)
+}
+
+func LoggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		log.Info().
+			Str("method", req.Method).
+			Str("url", req.URL.String()).
+			Str("remote", req.RemoteAddr).
+			Msg("Incoming request")
+
+		lrw := &LoggingResponseWriter{ResponseWriter: w}
+		start := time.Now()
+
+		next.ServeHTTP(lrw, req)
+
+		// If responseCode is 0, neither WriteHeader nor Write was called
+		// This should be treated as 200 OK per HTTP specification
+		statusCode := lrw.responseCode
+		if statusCode == 0 {
+			statusCode = http.StatusOK
+		}
+
+		event := log.Info()
+		msg := "Success response"
+		if statusCode >= 400 && statusCode < 500 {
+			event = log.Warn()
+			msg = "4xx response"
+		} else if statusCode >= 500 {
+			event = log.Error()
+			msg = "5xx response"
+		} else if statusCode >= 300 && statusCode < 400 {
+			msg = "3xx redirection response"
+		} else if statusCode >= 100 && statusCode < 200 {
+			msg = "1xx informational response"
+		}
+
+		event.
+			Str("method", req.Method).
+			Str("url", req.URL.String()).
+			Str("remote", req.RemoteAddr).
+			Int("responseCode", statusCode).
+			Dur("duration", time.Since(start)).
+			Msg(msg)
+	})
+}
+
+type LoggingResponseWriter struct {
+	http.ResponseWriter
+	responseCode int
+	wroteHeader  bool
+}
+
+func (lrw *LoggingResponseWriter) WriteHeader(code int) {
+	if !lrw.wroteHeader {
+		lrw.responseCode = code
+		lrw.wroteHeader = true
+		lrw.ResponseWriter.WriteHeader(code)
+	}
+}
+
+func (lrw *LoggingResponseWriter) Write(b []byte) (int, error) {
+	if !lrw.wroteHeader {
+		lrw.WriteHeader(http.StatusOK)
+	}
+	return lrw.ResponseWriter.Write(b)
 }

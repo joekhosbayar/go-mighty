@@ -60,7 +60,7 @@ func main() {
 	}
 
 	log.Printf("Server starting on port %s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	if err := http.ListenAndServe(":"+port, api.LoggingMiddleware(mux)); err != nil {
 		log.Fatal(err)
 	}
 }
