@@ -69,10 +69,10 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 	g.Version++
 	g.UpdatedAt = time.Now()
 
-	// Check if game full -> Start?
-	// User can explicitly start, or auto-start?
-	// Architecture said "StartGame: Validates all 5 players joined".
-	// We'll leave StartGame separate.
+	// Check if game full -> Start
+	if g.IsFull() {
+		g.Start()
+	}
 
 	// Save
 	if err := s.redisStore.SaveGame(ctx, g); err != nil {

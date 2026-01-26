@@ -118,6 +118,17 @@ func NewGame(id string) *GameState {
 	return g
 }
 
+// IsFull checks if the game has 5 players
+func (g *GameState) IsFull() bool {
+	count := 0
+	for _, p := range g.Players {
+		if p != nil {
+			count++
+		}
+	}
+	return count == 5
+}
+
 // Start deals the cards and starts the bidding phase
 func (g *GameState) Start() {
 	deck := NewDeck()
