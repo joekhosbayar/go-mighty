@@ -314,7 +314,7 @@ func TestLoggingMiddleware_PreservesHeaders(t *testing.T) {
 	}
 }
 
-// TestLoggingResponseWriter_WriteHeaderOnlyOnce tests that WriteHeader can only be called once
+// TestLoggingResponseWriter_WriteHeaderOnlyOnce tests that WriteHeader only tracks the first call
 func TestLoggingResponseWriter_WriteHeaderOnlyOnce(t *testing.T) {
 	rec := httptest.NewRecorder()
 	lrw := &LoggingResponseWriter{ResponseWriter: rec}
@@ -325,16 +325,15 @@ func TestLoggingResponseWriter_WriteHeaderOnlyOnce(t *testing.T) {
 		t.Errorf("Expected responseCode 200, got %d", lrw.responseCode)
 	}
 
-	// Second call should be ignored by underlying ResponseWriter (Go's standard behavior)
-	// but our wrapper should still track it
+	// Second call should be ignored by both the wrapper and underlying ResponseWriter
 	lrw.WriteHeader(http.StatusBadRequest)
 	
-	// The wrapper tracks the second call
-	if lrw.responseCode != http.StatusBadRequest {
-		t.Errorf("Expected responseCode 400, got %d", lrw.responseCode)
+	// The wrapper should still have the first status code
+	if lrw.responseCode != http.StatusOK {
+		t.Errorf("Expected responseCode to remain 200, got %d", lrw.responseCode)
 	}
 
-	// But the underlying ResponseWriter should still have the first status
+	// The underlying ResponseWriter should also still have the first status
 	if rec.Code != http.StatusOK {
 		t.Errorf("Expected underlying code 200, got %d", rec.Code)
 	}

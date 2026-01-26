@@ -191,8 +191,10 @@ type LoggingResponseWriter struct {
 }
 
 func (lrw *LoggingResponseWriter) WriteHeader(code int) {
-	lrw.responseCode = code
-	lrw.wroteHeader = true
+	if !lrw.wroteHeader {
+		lrw.responseCode = code
+		lrw.wroteHeader = true
+	}
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
