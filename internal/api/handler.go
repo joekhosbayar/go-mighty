@@ -160,17 +160,24 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(lrw, req)
 
+		// If responseCode is 0, neither WriteHeader nor Write was called
+		// This should be treated as 200 OK per HTTP specification
+		statusCode := lrw.responseCode
+		if statusCode == 0 {
+			statusCode = http.StatusOK
+		}
+
 		event := log.Info()
 		msg := "Success response"
-		if lrw.responseCode >= 400 && lrw.responseCode < 500 {
+		if statusCode >= 400 && statusCode < 500 {
 			event = log.Warn()
 			msg = "4xx response"
-		} else if lrw.responseCode >= 500 {
+		} else if statusCode >= 500 {
 			event = log.Error()
 			msg = "5xx response"
-		} else if lrw.responseCode >= 300 && lrw.responseCode < 400 {
+		} else if statusCode >= 300 && statusCode < 400 {
 			msg = "3xx redirection response"
-		} else if lrw.responseCode >= 100 && lrw.responseCode < 200 {
+		} else if statusCode >= 100 && statusCode < 200 {
 			msg = "1xx informational response"
 		}
 
@@ -178,7 +185,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			Str("method", req.Method).
 			Str("url", req.URL.String()).
 			Str("remote", req.RemoteAddr).
-			Int("responseCode", lrw.responseCode).
+			Int("responseCode", statusCode).
 			Dur("duration", time.Since(start)).
 			Msg(msg)
 	})

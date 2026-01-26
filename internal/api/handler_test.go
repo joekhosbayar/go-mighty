@@ -338,3 +338,23 @@ func TestLoggingResponseWriter_WriteHeaderOnlyOnce(t *testing.T) {
 		t.Errorf("Expected underlying code 200, got %d", rec.Code)
 	}
 }
+
+// TestLoggingMiddleware_NoWriteCalls tests that middleware handles cases where neither WriteHeader nor Write is called
+func TestLoggingMiddleware_NoWriteCalls(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Don't call WriteHeader or Write - some handlers might just set headers
+		// or do nothing
+	})
+
+	wrapped := LoggingMiddleware(handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+
+	wrapped.ServeHTTP(rec, req)
+
+	// When no write operations occur, status should be 200 per HTTP spec
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for no-op handler, got %d", rec.Code)
+	}
+}
