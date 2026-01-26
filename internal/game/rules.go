@@ -313,8 +313,18 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 	switch moveType {
 	case MoveBid:
 		bid := payload.(Bid)
-		g.CurrentBid = &bid
-		g.Declarer = p.Seat // Potential declarer
+		bid.PlayerID = playerID // Ensure playerID is set
+
+		// If pass
+		if bid.Points == 0 {
+			p := g.GetPlayer(playerID)
+			if p != nil {
+				g.PassedPlayers[p.Seat] = true
+			}
+		} else {
+			g.CurrentBid = &bid
+			g.Declarer = p.Seat // Potential declarer
+		}
 		// In rotation, move turn to next player?
 		// Or if everyone passes?
 		// Simplified: We assume bidding continues until 4 passes?
