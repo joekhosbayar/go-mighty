@@ -10,9 +10,20 @@ import (
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	"github.com/joekhosbayar/go-mighty/internal/store/redis"
+	"github.com/rs/zerolog"
 )
 
 func main() {
+	// 0. Logging Config
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "debug" // Default to debug as requested
+	}
+	level, parseErr := zerolog.ParseLevel(logLevel)
+	if parseErr != nil {
+		level = zerolog.DebugLevel
+	}
+	zerolog.SetGlobalLevel(level)
 	// 1. Config
 	pgConn := os.Getenv("POSTGRES_CONN")
 	if pgConn == "" {
