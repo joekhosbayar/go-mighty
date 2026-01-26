@@ -16,7 +16,7 @@ func main() {
 	// 1. Config
 	pgConn := os.Getenv("POSTGRES_CONN")
 	if pgConn == "" {
-		pgConn = "postgres://mighty:mightypassword@localhost:5432/mighty_db?sslmode=disable"
+		pgConn = "postgres://postgres:mightypassword@localhost:5432/postgres?sslmode=disable"
 	}
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {

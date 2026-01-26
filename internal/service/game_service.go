@@ -80,7 +80,9 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 
 	// Save Move to Postgres (Join is a move?)
 	// Architecture says "Inserts join move to Postgres ledger".
-	s.postgresStore.SaveMove(ctx, "join", playerID, seat, g.Version, map[string]interface{}{"name": playerName}, gameID)
+	if err := s.postgresStore.SaveMove(ctx, "join", playerID, seat, g.Version, g.Version-1, map[string]interface{}{"name": playerName}, gameID); err != nil {
+		return nil, fmt.Errorf("failed to save join move in db: %w", err)
+	}
 
 	// Publish
 	s.redisStore.PublishEvent(ctx, gameID, map[string]interface{}{
@@ -137,7 +139,9 @@ func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, 
 	if p != nil {
 		seat = p.Seat
 	}
-	s.postgresStore.SaveMove(ctx, moveType, playerID, seat, g.Version, payload, gameID)
+	if err := s.postgresStore.SaveMove(ctx, moveType, playerID, seat, g.Version, clientVersion, payload, gameID); err != nil {
+		return nil, fmt.Errorf("failed to save move in db: %w", err)
+	}
 
 	// 8. Publish
 	s.redisStore.PublishEvent(ctx, gameID, map[string]interface{}{

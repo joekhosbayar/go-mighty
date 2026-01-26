@@ -30,21 +30,15 @@ func (s *Store) CreateGame(ctx context.Context, g *game.GameState) error {
 	return err
 }
 
-func (s *Store) SaveMove(ctx context.Context, moveType game.MoveType, playerID string, seat int, version int64, payload interface{}, gameID string) error {
+func (s *Store) SaveMove(ctx context.Context, moveType game.MoveType, playerID string, seat int, version int64, clientVersion int64, payload interface{}, gameID string) error {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	// client_version is not passed here? It is used for validation.
-	// The ledger stores the resulting version usually.
-	// But architecture says: "client_version... Client's known version".
-	// Let's assume we store the version resulting from the move.
-
+	// clientVersion represents the client's known game version at the time they submitted the move.
 	query := `INSERT INTO moves (game_id, player_id, seat_no, version, client_version, move_type, payload, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`
-	// Assuming client_version matches version-1 for now, or just store version.
-	// We'll just pass version as client_version for now to satisfy schema.
-	_, err = s.db.ExecContext(ctx, query, gameID, playerID, seat, version, version-1, string(moveType), payloadJSON)
+	_, err = s.db.ExecContext(ctx, query, gameID, playerID, seat, version, clientVersion, string(moveType), payloadJSON)
 	return err
 }
 
