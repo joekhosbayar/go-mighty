@@ -178,8 +178,10 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 	}
 
 	// Trick Validation Logic
-	if g.CurrentTrick != nil && len(g.CurrentTrick.Cards) > 0 {
-		lead := g.CurrentTrick.LeadSuit
+	// Get the current trick (last trick in the list)
+	currentTrickIdx := len(g.Tricks) - 1
+	if currentTrickIdx >= 0 && len(g.Tricks[currentTrickIdx].Cards) > 0 {
+		lead := g.Tricks[currentTrickIdx].LeadSuit
 		// If holding lead suit, MUST follow suit
 		// Exceptions: Mighty, Joker
 
@@ -202,8 +204,8 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 
 		// Implementation of Ripper force:
 		ripperLed := false
-		if len(g.CurrentTrick.Cards) > 0 {
-			leadCard := g.CurrentTrick.Cards[0].Card
+		if len(g.Tricks[currentTrickIdx].Cards) > 0 {
+			leadCard := g.Tricks[currentTrickIdx].Cards[0].Card
 			if g.IsRipper(leadCard) {
 				ripperLed = true
 			}

@@ -105,7 +105,7 @@ func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, 
 	defer s.redisStore.ReleaseLock(ctx, gameID)
 
 	// 2. Check Version
-	err := s.redisStore.CheckVersion(ctx, gameID, clientVersion)
+	err = s.redisStore.CheckVersion(ctx, gameID, clientVersion)
 	if err != nil {
 		return nil, err // Returns stale version error
 	}
