@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
-	"go-mighty/internal/service"
+	"github.com/joekhosbayar/go-mighty/internal/service"
 
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
@@ -207,7 +208,8 @@ func (h *Handler) SubmitMove(w http.ResponseWriter, r *http.Request) {
 		log.Error().Err(err).Str("game_id", gameID).Str("move_type", string(moveReq.MoveType)).Msg("Failed to process move")
 
 		// Check for version mismatch
-		if err.Error() == "version mismatch" || err.Error()[:7] == "version" {
+		errMsg := err.Error()
+		if errMsg == "version mismatch" || strings.HasPrefix(errMsg, "version") {
 			respondError(w, http.StatusConflict, err.Error())
 			return
 		}

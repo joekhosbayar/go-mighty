@@ -76,9 +76,8 @@ type GameState struct {
 	IsNoFriend  bool  `json:"is_no_friend"`
 
 	// Play
-	Trump        Suit    `json:"trump"`
-	Tricks       []Trick `json:"tricks"`
-	CurrentTrick *Trick  `json:"current_trick"`
+	Trump  Suit    `json:"trump"`
+	Tricks []Trick `json:"tricks"`
 
 	// Scoring
 	Scores map[string]int `json:"scores"` // Points taken by each player (accumulated)

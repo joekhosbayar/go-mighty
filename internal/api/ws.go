@@ -2,13 +2,28 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true }, // Allow all origins for now
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		// Allow non-browser clients that may not set Origin.
+		if origin == "" {
+			return true
+		}
+
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+
+		// Only allow requests from the same host.
+		return u.Host == r.Host
+	},
 }
 
 // WSHandler handles websocket connections
