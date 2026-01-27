@@ -36,7 +36,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to upgrade websocket")
+		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
 		return
 	}
 	defer conn.Close()

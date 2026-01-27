@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -358,3 +360,74 @@ func TestLoggingMiddleware_NoWriteCalls(t *testing.T) {
 		t.Errorf("Expected status 200 for no-op handler, got %d", rec.Code)
 	}
 }
+
+// TestLoggingResponseWriter_Hijack tests that Hijack properly delegates to underlying ResponseWriter
+func TestLoggingResponseWriter_Hijack(t *testing.T) {
+	t.Run("Hijack not supported", func(t *testing.T) {
+		// httptest.ResponseRecorder does not support hijacking
+		rec := httptest.NewRecorder()
+		lrw := &LoggingResponseWriter{ResponseWriter: rec}
+
+		_, _, err := lrw.Hijack()
+		if err == nil {
+			t.Error("Expected error when Hijack is not supported")
+		}
+		if err.Error() != "hijack not supported" {
+			t.Errorf("Expected 'hijack not supported' error, got %v", err)
+		}
+	})
+
+	t.Run("Hijack supported", func(t *testing.T) {
+		// Create a mock ResponseWriter that implements http.Hijacker
+		mockHijacker := &mockHijackerResponseWriter{}
+		lrw := &LoggingResponseWriter{ResponseWriter: mockHijacker}
+
+		conn, rw, err := lrw.Hijack()
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if !mockHijacker.hijackCalled {
+			t.Error("Expected Hijack to be called on underlying ResponseWriter")
+		}
+		if conn == nil {
+			t.Error("Expected non-nil connection")
+		}
+		if rw == nil {
+			t.Error("Expected non-nil ReadWriter")
+		}
+	})
+}
+
+// mockHijackerResponseWriter is a mock ResponseWriter that implements http.Hijacker
+type mockHijackerResponseWriter struct {
+	hijackCalled bool
+}
+
+func (m *mockHijackerResponseWriter) Header() http.Header {
+	return http.Header{}
+}
+
+func (m *mockHijackerResponseWriter) Write([]byte) (int, error) {
+	return 0, nil
+}
+
+func (m *mockHijackerResponseWriter) WriteHeader(statusCode int) {}
+
+func (m *mockHijackerResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	m.hijackCalled = true
+	// Return mock values
+	return &mockConn{}, bufio.NewReadWriter(bufio.NewReader(nil), bufio.NewWriter(nil)), nil
+}
+
+// mockConn is a minimal implementation of net.Conn for testing
+type mockConn struct{}
+
+func (m *mockConn) Read(b []byte) (n int, err error)   { return 0, nil }
+func (m *mockConn) Write(b []byte) (n int, err error)  { return 0, nil }
+func (m *mockConn) Close() error                       { return nil }
+func (m *mockConn) LocalAddr() net.Addr                { return nil }
+func (m *mockConn) RemoteAddr() net.Addr               { return nil }
+func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
+func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
+func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
+
