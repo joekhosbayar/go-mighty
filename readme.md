@@ -42,5 +42,27 @@ It only guarantees the postgres and redis containers are started before the API 
 Otherwise the container will have an old secret cached.
 
 # Debugging
-`docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build`
+
+The debug compose setup will start **all** services defined in both `docker-compose.yml`
+and `docker-compose.debug.yml` (API, Postgres, Redis, etc.).
+
+1. (Recommended) Stop any existing stack for this project to avoid port conflicts:
+
+   ```bash
+   docker compose down
+   ```
+
+2. Start the services in debug mode:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build
+   ```
+
+3. The Go debugger will be available on **port 2345** on your host (e.g. `localhost:2345`).
+
+   - In VS Code, the project includes a ready-to-use debug configuration in `.vscode/launch.json`
+     named **"Connect to server"** that connects to `localhost:2345`.
+   - After the containers are up, select this configuration from the Run and Debug panel and
+     start debugging.
+
 

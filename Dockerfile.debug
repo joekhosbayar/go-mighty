@@ -19,13 +19,19 @@ COPY . .
 # -gcflags "all=-N -l" disables optimizations and inlining
 RUN go build -gcflags "all=-N -l" -o mighty ./cmd/server
 
+# Create nonroot user and adjust permissions for consistency with production
+RUN groupadd -r nonroot && useradd -r -g nonroot nonroot && \
+    chown -R nonroot:nonroot /app
+
 # Expose ports
 EXPOSE 8080 2345
+
+# Drop root privileges for security consistency with production
+USER nonroot:nonroot
 
 # Start Delve
 # --listen=:2345            : Listen on port 2345
 # --headless=true           : Run in headless mode (no TTY)
 # --api-version=2           : Use API version 2
-# --accept-multiclient      : Allow multiple clients to connect
 # exec ./mighty             : Execute the binary
-CMD ["dlv", "--listen=:2345", "--headless=true", "--api-version=2", "--accept-multiclient", "exec", "./mighty"]
+CMD ["dlv", "--listen=:2345", "--headless=true", "--api-version=2", "exec", "./mighty"]
