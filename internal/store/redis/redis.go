@@ -44,7 +44,11 @@ func (s *Store) SaveGame(ctx context.Context, g *game.GameState) (err error) {
 		if err != nil {
 			event.Err(err).Msg("SaveGame failed")
 		} else {
-			event.Interface("game_state", g).Msg("SaveGame success")
+			event.
+				Str("game_id", g.ID).
+				Int64("version", g.Version).
+				Str("status", string(g.Status)).
+				Msg("SaveGame success")
 		}
 	}()
 
@@ -80,7 +84,11 @@ func (s *Store) LoadGame(ctx context.Context, gameID string) (g *game.GameState,
 		} else if g == nil {
 			event.Msg("LoadGame not found")
 		} else {
-			event.Interface("game_state", g).Msg("LoadGame success")
+			event.
+				Str("game_id", g.ID).
+				Int64("version", g.Version).
+				Str("status", string(g.Status)).
+				Msg("LoadGame success")
 		}
 	}()
 
@@ -168,12 +176,23 @@ func (s *Store) PublishEvent(ctx context.Context, gameID string, event interface
 	start := time.Now()
 	channel := s.Key(gameID) + ":events"
 	defer func() {
-		log.Debug().
+		logEvent := log.Debug().
 			Str("component", "redis").
 			Str("op", "PublishEvent").
-			Str("channel", channel).
-			Interface("event", event).
-			Err(err).
+			Str("channel", channel)
+		
+		// Try to extract event type from map if it exists
+		if eventMap, ok := event.(map[string]interface{}); ok {
+			if eventType, hasType := eventMap["type"]; hasType {
+				logEvent = logEvent.Interface("event_type", eventType)
+			} else {
+				logEvent = logEvent.Str("event_type", fmt.Sprintf("%T", event))
+			}
+		} else {
+			logEvent = logEvent.Str("event_type", fmt.Sprintf("%T", event))
+		}
+		
+		logEvent.Err(err).
 			Dur("latency", time.Since(start)).
 			Msg("PublishEvent")
 	}()
