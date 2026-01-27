@@ -68,7 +68,7 @@ and `docker-compose.debug.yml` (API, Postgres, Redis, etc.).
 
 # Websocket upgrade request
 ```
-curl --include --output\
+curl --include \
      --no-buffer \
      --header "Connection: Upgrade" \
      --header "Upgrade: websocket" \
