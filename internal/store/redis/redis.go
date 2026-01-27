@@ -176,12 +176,23 @@ func (s *Store) PublishEvent(ctx context.Context, gameID string, event interface
 	start := time.Now()
 	channel := s.Key(gameID) + ":events"
 	defer func() {
-		log.Debug().
+		logEvent := log.Debug().
 			Str("component", "redis").
 			Str("op", "PublishEvent").
-			Str("channel", channel).
-			Str("event_type", fmt.Sprintf("%T", event)).
-			Err(err).
+			Str("channel", channel)
+		
+		// Try to extract event type from map if it exists
+		if eventMap, ok := event.(map[string]interface{}); ok {
+			if eventType, hasType := eventMap["type"]; hasType {
+				logEvent = logEvent.Interface("event_type", eventType)
+			} else {
+				logEvent = logEvent.Str("event_type", fmt.Sprintf("%T", event))
+			}
+		} else {
+			logEvent = logEvent.Str("event_type", fmt.Sprintf("%T", event))
+		}
+		
+		logEvent.Err(err).
 			Dur("latency", time.Since(start)).
 			Msg("PublishEvent")
 	}()
