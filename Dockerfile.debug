@@ -1,0 +1,31 @@
+############################
+# Debug Build Stage
+############################
+FROM golang:1.25
+
+WORKDIR /app
+
+# Install Delve
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
+# Copy dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Build with debug flags
+# -gcflags "all=-N -l" disables optimizations and inlining
+RUN go build -gcflags "all=-N -l" -o mighty ./cmd/server
+
+# Expose ports
+EXPOSE 8080 2345
+
+# Start Delve
+# --listen=:2345            : Listen on port 2345
+# --headless=true           : Run in headless mode (no TTY)
+# --api-version=2           : Use API version 2
+# --accept-multiclient      : Allow multiple clients to connect
+# exec ./mighty             : Execute the binary
+CMD ["dlv", "--listen=:2345", "--headless=true", "--api-version=2", "--accept-multiclient", "exec", "./mighty"]
