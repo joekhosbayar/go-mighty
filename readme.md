@@ -40,3 +40,7 @@ It only guarantees the postgres and redis containers are started before the API 
 # To reset secrets, need to run docker compose down -v
 `docker compose down -v`
 Otherwise the container will have an old secret cached.
+
+# Debugging
+`docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build`
+
