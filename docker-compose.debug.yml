@@ -5,6 +5,9 @@ services:
       dockerfile: Dockerfile.debug
     ports:
       - "2345:2345"
+      - "8080:8080"
+    # WARNING: The following security settings are for DEVELOPMENT/DEBUGGING ONLY
+    # and should NEVER be used in production. They significantly weaken container security.
     security_opt:
       - "seccomp:unconfined"
     cap_add:
@@ -12,4 +15,4 @@ services:
     environment:
       # Ensure any environment variables needed for dev are here
       # (Inherits from base docker-compose.yml usually, but good to check)
-      GO_ENV: development
+      LOG_LEVEL: debug
