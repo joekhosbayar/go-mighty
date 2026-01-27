@@ -9,6 +9,7 @@ import (
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -31,8 +32,26 @@ func (s *Store) Key(gameID string) string {
 	return fmt.Sprintf("game:%s", gameID)
 }
 
-func (s *Store) SaveGame(ctx context.Context, g *game.GameState) error {
+func (s *Store) SaveGame(ctx context.Context, g *game.GameState) (err error) {
+	start := time.Now()
 	key := s.Key(g.ID)
+	defer func() {
+		event := log.Debug().
+			Str("component", "redis").
+			Str("op", "SaveGame").
+			Str("key", key).
+			Dur("latency", time.Since(start))
+		if err != nil {
+			event.Err(err).Msg("SaveGame failed")
+		} else {
+			event.
+				Str("game_id", g.ID).
+				Int64("version", g.Version).
+				Str("status", string(g.Status)).
+				Msg("SaveGame success")
+		}
+	}()
+
 	data, err := json.Marshal(g)
 	if err != nil {
 		return err
@@ -51,8 +70,28 @@ func (s *Store) SaveGame(ctx context.Context, g *game.GameState) error {
 	return s.client.Set(ctx, key+":version", g.Version, 24*time.Hour).Err()
 }
 
-func (s *Store) LoadGame(ctx context.Context, gameID string) (*game.GameState, error) {
+func (s *Store) LoadGame(ctx context.Context, gameID string) (g *game.GameState, err error) {
+	start := time.Now()
 	key := s.Key(gameID)
+	defer func() {
+		event := log.Debug().
+			Str("component", "redis").
+			Str("op", "LoadGame").
+			Str("key", key).
+			Dur("latency", time.Since(start))
+		if err != nil {
+			event.Err(err).Msg("LoadGame failed")
+		} else if g == nil {
+			event.Msg("LoadGame not found")
+		} else {
+			event.
+				Str("game_id", g.ID).
+				Int64("version", g.Version).
+				Str("status", string(g.Status)).
+				Msg("LoadGame success")
+		}
+	}()
+
 	data, err := s.client.Get(ctx, key+":state").Bytes()
 	if err != nil {
 		if err == redis.Nil {
@@ -61,28 +100,61 @@ func (s *Store) LoadGame(ctx context.Context, gameID string) (*game.GameState, e
 		return nil, err
 	}
 
-	var g game.GameState
-	if err := json.Unmarshal(data, &g); err != nil {
+	var loadedGame game.GameState
+	if err := json.Unmarshal(data, &loadedGame); err != nil {
 		return nil, err
 	}
-	return &g, nil
+	return &loadedGame, nil
 }
 
 // AcquireLock acquires a distributed lock for the game
-func (s *Store) AcquireLock(ctx context.Context, gameID string) (bool, error) {
+func (s *Store) AcquireLock(ctx context.Context, gameID string) (locked bool, err error) {
+	start := time.Now()
 	key := s.Key(gameID) + ":lock"
+	defer func() {
+		log.Debug().
+			Str("component", "redis").
+			Str("op", "AcquireLock").
+			Str("key", key).
+			Bool("locked", locked).
+			Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("AcquireLock")
+	}()
 	// Simple setnx with expiration
 	return s.client.SetNX(ctx, key, "locked", 5*time.Second).Result()
 }
 
-func (s *Store) ReleaseLock(ctx context.Context, gameID string) error {
+func (s *Store) ReleaseLock(ctx context.Context, gameID string) (err error) {
+	start := time.Now()
 	key := s.Key(gameID) + ":lock"
+	defer func() {
+		log.Debug().
+			Str("component", "redis").
+			Str("op", "ReleaseLock").
+			Str("key", key).
+			Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("ReleaseLock")
+	}()
 	return s.client.Del(ctx, key).Err()
 }
 
 // CheckVersion checks if client version matches server version
-func (s *Store) CheckVersion(ctx context.Context, gameID string, clientVersion int64) error {
+func (s *Store) CheckVersion(ctx context.Context, gameID string, clientVersion int64) (err error) {
+	start := time.Now()
 	key := s.Key(gameID) + ":version"
+	defer func() {
+		log.Debug().
+			Str("component", "redis").
+			Str("op", "CheckVersion").
+			Str("key", key).
+			Int64("client_version", clientVersion).
+			Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("CheckVersion")
+	}()
+
 	val, err := s.client.Get(ctx, key).Int64()
 	if err != nil {
 		if err == redis.Nil {
@@ -100,8 +172,31 @@ func (s *Store) CheckVersion(ctx context.Context, gameID string, clientVersion i
 	return nil
 }
 
-func (s *Store) PublishEvent(ctx context.Context, gameID string, event interface{}) error {
+func (s *Store) PublishEvent(ctx context.Context, gameID string, event interface{}) (err error) {
+	start := time.Now()
 	channel := s.Key(gameID) + ":events"
+	defer func() {
+		logEvent := log.Debug().
+			Str("component", "redis").
+			Str("op", "PublishEvent").
+			Str("channel", channel)
+		
+		// Try to extract event type from map if it exists
+		if eventMap, ok := event.(map[string]interface{}); ok {
+			if eventType, hasType := eventMap["type"]; hasType {
+				logEvent = logEvent.Interface("event_type", eventType)
+			} else {
+				logEvent = logEvent.Str("event_type", fmt.Sprintf("%T", event))
+			}
+		} else {
+			logEvent = logEvent.Str("event_type", fmt.Sprintf("%T", event))
+		}
+		
+		logEvent.Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("PublishEvent")
+	}()
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -111,5 +206,10 @@ func (s *Store) PublishEvent(ctx context.Context, gameID string, event interface
 
 func (s *Store) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
 	channel := s.Key(gameID) + ":events"
+	log.Debug().
+		Str("component", "redis").
+		Str("op", "Subscribe").
+		Str("channel", channel).
+		Msg("Subscribing to channel")
 	return s.client.Subscribe(ctx, channel)
 }

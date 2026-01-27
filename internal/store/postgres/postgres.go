@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	_ "github.com/lib/pq"
+	"github.com/rs/zerolog/log"
 )
 
 type Store struct {
@@ -24,14 +26,38 @@ func NewStore(connStr string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (s *Store) CreateGame(ctx context.Context, g *game.GameState) error {
+func (s *Store) CreateGame(ctx context.Context, g *game.GameState) (err error) {
+	start := time.Now()
+	defer func() {
+		log.Debug().
+			Str("component", "postgres").
+			Str("op", "CreateGame").
+			Str("game_id", g.ID).
+			Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("CreateGame")
+	}()
 	query := `INSERT INTO games (id, status, version, created_at) VALUES ($1, $2, $3, $4)`
-	_, err := s.db.ExecContext(ctx, query, g.ID, g.Status, g.Version, g.CreatedAt)
+	_, err = s.db.ExecContext(ctx, query, g.ID, g.Status, g.Version, g.CreatedAt)
 	return err
 }
 
-func (s *Store) SaveMove(ctx context.Context, moveType game.MoveType, playerID string, seat int, version int64, clientVersion int64, payload interface{}, gameID string) error {
+func (s *Store) SaveMove(ctx context.Context, moveType game.MoveType, playerID string, seat int, version int64, clientVersion int64, payload interface{}, gameID string) (err error) {
+	start := time.Now()
+	defer func() {
+		log.Debug().
+			Str("component", "postgres").
+			Str("op", "SaveMove").
+			Str("game_id", gameID).
+			Str("player_id", playerID).
+			Str("move_type", string(moveType)).
+			Int64("version", version).
+			Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("SaveMove")
+	}()
 	payloadJSON, err := json.Marshal(payload)
+
 	if err != nil {
 		return err
 	}
@@ -42,8 +68,20 @@ func (s *Store) SaveMove(ctx context.Context, moveType game.MoveType, playerID s
 	return err
 }
 
-func (s *Store) UpdateGameStatus(ctx context.Context, gameID string, status game.Phase, version int64) error {
+func (s *Store) UpdateGameStatus(ctx context.Context, gameID string, status game.Phase, version int64) (err error) {
+	start := time.Now()
+	defer func() {
+		log.Debug().
+			Str("component", "postgres").
+			Str("op", "UpdateGameStatus").
+			Str("game_id", gameID).
+			Str("status", string(status)).
+			Int64("version", version).
+			Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("UpdateGameStatus")
+	}()
 	query := `UPDATE games SET status = $1, version = $2, updated_at = NOW() WHERE id = $3`
-	_, err := s.db.ExecContext(ctx, query, status, version, gameID)
+	_, err = s.db.ExecContext(ctx, query, status, version, gameID)
 	return err
 }
