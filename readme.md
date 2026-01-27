@@ -60,8 +60,9 @@ and `docker-compose.debug.yml` (API, Postgres, Redis, etc.).
 
 3. The Go debugger will be available on **port 2345** on your host (e.g. `localhost:2345`).
 
-   - In VS Code, use an **Attach** configuration in `.vscode/launch.json` that targets
-     `localhost` on port `2345` (for example, a Go "Attach to remote" debug config).
-   - After the containers are up, start the attach configuration to begin debugging.
+   - In VS Code, the project includes a ready-to-use debug configuration in `.vscode/launch.json`
+     named **"Connect to server"** that connects to `localhost:2345`.
+   - After the containers are up, select this configuration from the Run and Debug panel and
+     start debugging.
 
 

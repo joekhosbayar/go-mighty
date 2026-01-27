@@ -21,7 +21,7 @@ RUN go build -gcflags "all=-N -l" -o mighty ./cmd/server
 
 # Create nonroot user and adjust permissions for consistency with production
 RUN groupadd -r nonroot && useradd -r -g nonroot nonroot && \
-    chown -R nonroot:nonroot /app /go
+    chown -R nonroot:nonroot /app
 
 # Expose ports
 EXPOSE 8080 2345
