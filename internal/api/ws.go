@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog/log"
 )
 
 var upgrader = websocket.Upgrader{
@@ -35,6 +36,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
 		return
 	}
 	defer conn.Close()

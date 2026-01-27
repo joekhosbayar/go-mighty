@@ -66,3 +66,15 @@ and `docker-compose.debug.yml` (API, Postgres, Redis, etc.).
      start debugging.
 
 
+# Websocket upgrade request
+```
+curl --include \
+     --no-buffer \
+     --header "Connection: Upgrade" \
+     --header "Upgrade: websocket" \
+     --header "Host: localhost:8080" \
+     --header "Origin: http://localhost:8080" \
+     --header "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+     --header "Sec-WebSocket-Version: 13" \
+     http://localhost:8080/games/1234/ws
+```

@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"time"
 
@@ -210,4 +213,13 @@ func (lrw *LoggingResponseWriter) Write(b []byte) (int, error) {
 		lrw.WriteHeader(http.StatusOK)
 	}
 	return lrw.ResponseWriter.Write(b)
+}
+
+// Hijack implements the http.Hijacker interface to allow WebSockets to work.
+func (lrw *LoggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := lrw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("hijack not supported")
+	}
+	return h.Hijack()
 }
