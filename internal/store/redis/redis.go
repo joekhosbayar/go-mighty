@@ -44,7 +44,11 @@ func (s *Store) SaveGame(ctx context.Context, g *game.GameState) (err error) {
 		if err != nil {
 			event.Err(err).Msg("SaveGame failed")
 		} else {
-			event.Interface("game_state", g).Msg("SaveGame success")
+			event.
+				Str("game_id", g.ID).
+				Int64("version", g.Version).
+				Str("status", string(g.Status)).
+				Msg("SaveGame success")
 		}
 	}()
 
@@ -80,7 +84,11 @@ func (s *Store) LoadGame(ctx context.Context, gameID string) (g *game.GameState,
 		} else if g == nil {
 			event.Msg("LoadGame not found")
 		} else {
-			event.Interface("game_state", g).Msg("LoadGame success")
+			event.
+				Str("game_id", g.ID).
+				Int64("version", g.Version).
+				Str("status", string(g.Status)).
+				Msg("LoadGame success")
 		}
 	}()
 
@@ -172,7 +180,7 @@ func (s *Store) PublishEvent(ctx context.Context, gameID string, event interface
 			Str("component", "redis").
 			Str("op", "PublishEvent").
 			Str("channel", channel).
-			Interface("event", event).
+			Str("event_type", fmt.Sprintf("%T", event)).
 			Err(err).
 			Dur("latency", time.Since(start)).
 			Msg("PublishEvent")

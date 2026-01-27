@@ -21,6 +21,7 @@ func main() {
 	}
 	level, parseErr := zerolog.ParseLevel(logLevel)
 	if parseErr != nil {
+		log.Printf("Invalid LOG_LEVEL %q: %v; falling back to %s", logLevel, parseErr, zerolog.DebugLevel)
 		level = zerolog.DebugLevel
 	}
 	zerolog.SetGlobalLevel(level)
