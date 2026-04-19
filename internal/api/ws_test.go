@@ -37,7 +37,8 @@ func TestWSHandler_RejectEarlyData(t *testing.T) {
 
 	// 1. Send HTTP Upgrade Request
 	// Note: We intentionally do NOT wait for the response here.
-	req := "GET /games/test-game/ws HTTP/1.1\r\n" +
+	token := generateValidToken("testuser", "test")
+	req := "GET /games/test-game/ws?token=" + token + " HTTP/1.1\r\n" +
 		"Host: localhost:" + port + "\r\n" +
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +

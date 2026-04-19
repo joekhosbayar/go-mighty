@@ -225,6 +225,8 @@ paths:
     get:
       summary: WebSocket connection for game updates
       operationId: connectWS
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -232,9 +234,17 @@ paths:
           schema:
             type: string
           description: The game ID
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+          description: JWT token for authentication (alternative to Authorization header)
       responses:
         '101':
           description: Switching Protocols to WebSocket. The connection will receive JSON Game objects upon updates.
+        '401':
+          description: Unauthorized
 
 components:
   securitySchemes:

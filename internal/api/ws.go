@@ -32,6 +32,12 @@ var upgrader = websocket.Upgrader{
 
 // WSHandler handles websocket connections
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
+	claims, err := h.authenticate(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	gameID := r.PathValue("id")
 
 	pubsub := h.svc.Subscribe(r.Context(), gameID)
@@ -43,7 +49,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
+		log.Error().Str("game_id", gameID).Str("user_id", claims.UserID).Err(err).Msg("Failed to upgrade websocket")
 		return
 	}
 	defer conn.Close()

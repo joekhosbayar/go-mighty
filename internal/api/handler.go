@@ -31,15 +31,25 @@ func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
 		return nil, errors.New("authentication service is not configured")
 	}
 
+	tokenString := ""
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return nil, errors.New("missing Authorization header")
+	if authHeader != "" {
+		parts := strings.Fields(authHeader)
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			tokenString = parts[1]
+		}
 	}
-	parts := strings.Fields(authHeader)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		return nil, errors.New("invalid Authorization header format")
+
+	// Fallback to query parameter for WebSockets
+	if tokenString == "" {
+		tokenString = r.URL.Query().Get("token")
 	}
-	return h.authSvc.ValidateToken(parts[1])
+
+	if tokenString == "" {
+		return nil, errors.New("missing authentication token")
+	}
+
+	return h.authSvc.ValidateToken(tokenString)
 }
 
 // SignupHandler - POST /auth/signup
