@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -48,7 +49,7 @@ type OutgoingWSError struct {
 
 // WSHandler handles websocket connections
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.authenticate(r)
+	claims, err := h.authenticateWS(r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -71,9 +72,10 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	ch := pubsub.Channel()
-	
+
 	// Create a channel to signal connection closure
 	done := make(chan struct{})
+	var writeMu sync.Mutex
 
 	// Write loop
 	go func() {
@@ -84,7 +86,9 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			case <-done:
 				return
 			case <-ticker.C:
+				writeMu.Lock()
 				err := conn.WriteMessage(websocket.PingMessage, nil)
+				writeMu.Unlock()
 				if err != nil {
 					return
 				}
@@ -93,7 +97,9 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 					return // pubsub closed
 				}
 				// msg.Payload is the JSON string from Redis
+				writeMu.Lock()
 				err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+				writeMu.Unlock()
 				if err != nil {
 					return
 				}
@@ -113,39 +119,46 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 		var inMsg IncomingWSMessage
 		if err := json.Unmarshal(message, &inMsg); err != nil {
-			h.sendWSError(conn, "invalid message format")
+			if wsErr := h.sendWSError(conn, "invalid message format", &writeMu); wsErr != nil {
+				log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
+			}
 			continue
 		}
 
 		if inMsg.Type == "MOVE" {
 			convertedPayload, err := ConvertPayload(inMsg.MoveType, inMsg.Payload)
 			if err != nil {
-				h.sendWSError(conn, "invalid payload structure: "+err.Error())
+				if wsErr := h.sendWSError(conn, "invalid payload structure: "+err.Error(), &writeMu); wsErr != nil {
+					log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
+				}
 				continue
 			}
 
-			// Process the move
-			// We use context.Background() here because the request context might be cancelled
-			// if the HTTP handler returns, but we want the move to complete. 
-			// Wait, WSHandler doesn't return until the connection is closed. So r.Context() is fine.
 			_, err = h.svc.ProcessMove(r.Context(), gameID, claims.UserID, inMsg.MoveType, convertedPayload, inMsg.ClientVersion)
 			if err != nil {
-				h.sendWSError(conn, err.Error())
+				if wsErr := h.sendWSError(conn, err.Error(), &writeMu); wsErr != nil {
+					log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
+				}
 				continue
 			}
-			// On success, the GameService publishes an event via Redis, 
+			// On success, the GameService publishes an event via Redis,
 			// which the write loop will pick up and send to all connected clients.
 		}
 	}
-	
+
 	close(done)
 }
 
-func (h *Handler) sendWSError(conn *websocket.Conn, errMsg string) {
+func (h *Handler) sendWSError(conn *websocket.Conn, errMsg string, writeMu *sync.Mutex) error {
 	errPayload := OutgoingWSError{
 		Type:  "ERROR",
 		Error: errMsg,
 	}
-	data, _ := json.Marshal(errPayload)
-	conn.WriteMessage(websocket.TextMessage, data)
+	data, err := json.Marshal(errPayload)
+	if err != nil {
+		return err
+	}
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	return conn.WriteMessage(websocket.TextMessage, data)
 }
