@@ -8,6 +8,15 @@ import (
 // ErrInvalidMove is returned when a move is invalid
 var ErrInvalidMove = fmt.Errorf("invalid move")
 
+// Power Constants for the Mighty Engine
+const (
+	PowerMighty = 1000
+	PowerJoker  = 500
+	PowerTrump  = 100
+	PowerLead   = 10
+	PowerBase   = 0
+)
+
 // ValidateMove checks if a move is valid for the current game state
 func (g *GameState) ValidateMove(playerID string, moveType MoveType, payload interface{}) error {
 	// 1. Check if player is in the game
@@ -159,7 +168,7 @@ func (g *GameState) validateCallPartner(p *Player, payload interface{}) error {
 }
 
 // validatePlayCard
-// Payload: Card
+// Payload: PlayCardMove
 func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 	if g.Status != PhasePlaying {
 		return fmt.Errorf("%w: not in playing phase", ErrInvalidMove)
@@ -168,87 +177,73 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 		return fmt.Errorf("%w: not your turn", ErrInvalidMove)
 	}
 
-	card, ok := payload.(Card)
+	move, ok := payload.(PlayCardMove)
 	if !ok {
-		return fmt.Errorf("invalid payload")
+		// Fallback for simple Card payload if necessary, but we prefer PlayCardMove
+		card, ok := payload.(Card)
+		if !ok {
+			return fmt.Errorf("invalid payload for play card")
+		}
+		move = PlayCardMove{Card: card}
 	}
 
+	card := move.Card
 	if !p.HasCard(card) {
 		return fmt.Errorf("%w: do not hold card %s", ErrInvalidMove, card)
 	}
 
 	// Trick Validation Logic
-	// Get the current trick (last trick in the list)
 	currentTrickIdx := len(g.Tricks) - 1
-	if currentTrickIdx >= 0 && len(g.Tricks[currentTrickIdx].Cards) > 0 {
-		lead := g.Tricks[currentTrickIdx].LeadSuit
-		// If holding lead suit, MUST follow suit
-		// Exceptions: Mighty, Joker
+	if currentTrickIdx < 0 {
+		return fmt.Errorf("no active trick")
+	}
+	t := g.Tricks[currentTrickIdx]
 
-		isMighty := g.IsMighty(card)
-		isJoker := card.Rank == Joker
-
-		// If player plays Mighty, allowed.
-		if isMighty {
-			return nil
+	// 1. Forced Play (Joker Called)
+	if t.JokerCalled && p.HasRank(Joker) {
+		// "The only exception is that if the joker holder also has the mighty in which case she may choose to play the mighty"
+		if card.Rank != Joker && !g.IsMighty(card) {
+			return fmt.Errorf("%w: joker called, must play joker or mighty", ErrInvalidMove)
 		}
+	}
 
-		// If player plays Joker
-		// "Joker can be played anytime"
-		// BUT "Joker loses power if Ripper led/played?" - This affects power, not legality usually.
-		// "Ripper may force Joker to be played"
-		// If Ripper was led, and player has Joker, MUST play Joker?
-		// Rules check: "Ripper... Can force the Joker to be played"
-		// This implies if Ripper led, holder of Joker MUST play it if they can?
-		// "If the Ripper is led... the Joker must be played." -> YES.
-
-		// Implementation of Ripper force:
-		ripperLed := false
-		if len(g.Tricks[currentTrickIdx].Cards) > 0 {
-			leadCard := g.Tricks[currentTrickIdx].Cards[0].Card
-			if g.IsRipper(leadCard) {
-				ripperLed = true
-			}
-		}
-
-		if ripperLed && p.HasRank(Joker) {
-			if card.Rank != Joker {
-				// Must play Joker!
-				// UNLESS they have Mighty? Mighty > all.
-				// Rules don't explicitly say Mighty saves Joker from Ripper.
-				// Usually Joker MUST be played.
-				return fmt.Errorf("%w: ripper led, must play joker", ErrInvalidMove)
-			}
-		}
-
-		// Regular follow suit
-		// If NOT Mighty and NOT Joker (and not forced), check suit
-		if !isJoker && card.Suit != lead {
-			// Player is reneging (playing off-suit).
-			// Allowed ONLY if player has NO cards of lead suit.
-			if p.HasSuit(lead) {
-				// WAIT! If they have lead suit...
-				// Can they play Joker? Yes ("Joker can be played anytime").
-				// Can they play Mighty? Yes.
-				// But if they play random off-suit card, that is invalid.
-				return fmt.Errorf("%w: must follow suit %s", ErrInvalidMove, lead)
-			}
-		}
-	} else {
-		// Leading (First card of trick)
-		// "No trump lead on trick one unless holding only trumps" (Optional rule? Rules.md says yes)
-		// Usually if it's the very first trick of the hand.
-		if len(g.Tricks) == 0 {
-			if card.Suit == g.Trump {
-				// Check if player has ONLY trumps (plus Mighty/Joker?)
-				// Simplified: if they have any non-trump, cannot lead trump.
-				if p.HasNonTrump(g.Trump) {
-					// Exception: Mighty can be led anytime? Mighty is part of trump suit effectively?
-					// Usually Mighty is considered a separate entity or part of Spades/Diamonds.
-					// If Mighty is led, it counts as its suit (Spades/Diamonds).
+	// 2. Leading Rules
+	if len(t.Cards) == 0 {
+		// First trick lead rules
+		if len(g.Tricks) == 1 {
+			// "The first card played must not be a trump card (unless all you have are trump cards)"
+			if card.Suit == g.Trump && p.HasNonTrump(g.Trump) {
+				// Exception: Mighty can be led anytime? Usually Mighty is "trump" but Ace of Spades.
+				// User says "first card must not be a trump card".
+				if !g.IsMighty(card) {
 					return fmt.Errorf("%w: cannot lead trump on first trick", ErrInvalidMove)
 				}
 			}
+		}
+
+		// Joker Caller option
+		if move.CallJoker && !g.IsJokerCaller(card) {
+			return fmt.Errorf("%w: only joker caller can call joker", ErrInvalidMove)
+		}
+		// Joker Caller loses power/ability on first and last trick
+		if move.CallJoker && (len(g.Tricks) == 1 || len(g.Tricks) == 10) {
+			return fmt.Errorf("%w: cannot call joker on first or last trick", ErrInvalidMove)
+		}
+
+		return nil
+	}
+
+	// 3. Following Suit
+	lead := t.LeadSuit
+	if card.Suit != lead {
+		// Allowed if playing Mighty or Joker
+		if g.IsMighty(card) || card.Rank == Joker {
+			return nil
+		}
+
+		// Otherwise, must follow suit if possible
+		if p.HasSuit(lead) {
+			return fmt.Errorf("%w: must follow suit %s", ErrInvalidMove, lead)
 		}
 	}
 
@@ -258,17 +253,17 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 // Helpers
 
 func (g *GameState) IsMighty(c Card) bool {
-	// Spades Ace is Mighty usually.
-	// If Spades is Trump, Diamond Ace is Mighty.
+	// Usually Ace of Spades.
+	// If Spades is Trump, Ace of Clubs is Mighty.
 	if g.Trump == Spades {
-		return c.Suit == Diamonds && c.Rank == Ace
+		return c.Suit == Clubs && c.Rank == Ace
 	}
 	return c.Suit == Spades && c.Rank == Ace
 }
 
-func (g *GameState) IsRipper(c Card) bool {
-	// Clubs 3 is Ripper.
-	// If Clubs is Trump, Spades 3 is Ripper.
+func (g *GameState) IsJokerCaller(c Card) bool {
+	// Usually Three of Clubs.
+	// If Clubs is Trump, Three of Spades is Joker Caller.
 	if g.Trump == Clubs {
 		return c.Suit == Spades && c.Rank == Three
 	}
@@ -390,7 +385,14 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 		g.Tricks = append(g.Tricks, Trick{Cards: []PlayedCard{}})
 
 	case MovePlayCard:
-		card := payload.(Card)
+		move, ok := payload.(PlayCardMove)
+		if !ok {
+			// Fallback for Card payload
+			card, _ := payload.(Card)
+			move = PlayCardMove{Card: card}
+		}
+		card := move.Card
+
 		// Remove from hand
 		newHand := []Card{}
 		for _, c := range p.Hand {
@@ -411,10 +413,19 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 
 		// Set Lead Suit if first card
 		if len(g.Tricks[idx].Cards) == 1 {
-			// Should handle Mighty/Joker lead suit rules?
-			// Usually Mighty/Joker don't set suit if led? Or they do?
-			// Simplified: First card sets suit unless it's Joker?
 			g.Tricks[idx].LeadSuit = card.Suit
+			// If Joker led, LeadSuit is whatever was passed?
+			// Actually Joker has no suit. The user said: "And if you begin the trick with the Joker, you have to specify the suit you want"
+			// So for Joker lead, we might need a JokerSuit in PlayCardMove.
+			// Let's assume Card.Suit is used to specify the suit for Joker lead.
+			if card.Rank == Joker {
+				g.Tricks[idx].LeadSuit = card.Suit
+			}
+
+			// Handle Joker Caller
+			if move.CallJoker && g.IsJokerCaller(card) {
+				g.Tricks[idx].JokerCalled = true
+			}
 		}
 
 		// Turn moves to next
@@ -450,21 +461,20 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 // ResolveTrick determines the winner and points
 func (g *GameState) ResolveTrick(t Trick) (int, []Card) {
 	winnerIdx := 0
-	winningCard := t.Cards[0].Card
+	maxPower := -1
 	points := []Card{}
+
+	// Calculate trick number (1-10)
+	trickNum := len(g.Tricks)
 
 	for i, pc := range t.Cards {
 		if pc.Card.IsPointCard() {
 			points = append(points, pc.Card)
 		}
 
-		if i == 0 {
-			continue
-		}
-
-		// Compare pc.Card with winningCard
-		if g.Beats(pc.Card, winningCard, t.LeadSuit) {
-			winningCard = pc.Card
+		power := g.CalculatePower(pc.Card, t, trickNum)
+		if power > maxPower {
+			maxPower = power
 			winnerIdx = i
 		}
 	}
@@ -472,49 +482,111 @@ func (g *GameState) ResolveTrick(t Trick) (int, []Card) {
 	return t.Cards[winnerIdx].Seat, points
 }
 
-// Beats returns true if c1 beats c2
-func (g *GameState) Beats(c1, c2 Card, leadSuit Suit) bool {
+// CalculatePower determines the contextual strength of a card
+func (g *GameState) CalculatePower(c Card, t Trick, trickNum int) int {
 	// 1. Mighty beats everything
-	if g.IsMighty(c1) {
-		return true
-	}
-	if g.IsMighty(c2) {
-		return false
+	if g.IsMighty(c) {
+		return PowerMighty
 	}
 
-	// 2. Joker beats everything else (unless lost power?)
-	// TODO: Check if joker lost power in this trick (if Ripper was played)
-	// Simplified: Joker beats non-Mighty
-	if c1.Rank == Joker {
-		return true
-	}
-	if c2.Rank == Joker {
-		return false
-	}
-
-	// 3. Trump beats non-trump
-	isTrump1 := c1.Suit == g.Trump
-	isTrump2 := c2.Suit == g.Trump
-
-	if isTrump1 && !isTrump2 {
-		return true
-	}
-	if !isTrump1 && isTrump2 {
-		return false
-	}
-
-	// 4. Same suit: Higher rank wins
-	if c1.Suit == c2.Suit {
-		return RankValue(c1.Rank) > RankValue(c2.Rank)
+	// 2. Joker Logic
+	if c.Rank == Joker {
+		// Joker loses power if:
+		// - Played in first or last trick
+		if trickNum == 1 || trickNum == 10 {
+			return PowerBase
+		}
+		// - Joker Caller led and called Joker
+		if t.JokerCalled {
+			return PowerBase
+		}
+		// - Mighty is in the trick
+		for _, pc := range t.Cards {
+			if g.IsMighty(pc.Card) {
+				return PowerBase
+			}
+		}
+		return PowerJoker
 	}
 
-	// 5. If c1 is lead suit and c2 is not (and not trump), c1 wins
-	if c1.Suit == leadSuit && c2.Suit != leadSuit {
-		return true
+	// 3. Trump suit
+	if c.Suit == g.Trump {
+		return PowerTrump + RankValue(c.Rank)
 	}
 
-	// c2 stays winner
-	return false
+	// 4. Lead suit
+	if c.Suit == t.LeadSuit {
+		return PowerLead + RankValue(c.Rank)
+	}
+
+	// 5. Standard rank
+	return PowerBase + RankValue(c.Rank)
+}
+
+// Beats returns true if c1 beats c2
+func (g *GameState) Beats(c1, c2 Card, t Trick) bool {
+	trickNum := len(g.Tricks)
+	return g.CalculatePower(c1, t, trickNum) > g.CalculatePower(c2, t, trickNum)
+}
+
+// CalculateFinalScore calculates the final points for the declarer and friend
+func (g *GameState) CalculateFinalScore() (float64, float64) {
+	if g.Contract == nil {
+		return 0, 0
+	}
+
+	// Let's count tricks won by the caller team
+	tricksWon := 0
+	for _, t := range g.Tricks {
+		if t.Winner == g.Declarer || t.Winner == g.PartnerSeat {
+			tricksWon++
+		}
+	}
+
+	// User's example says "7-spade bid... win 7 out of 10 tricks".
+	contractGoal := g.Contract.Points 
+	
+	score := 0.0
+	diff := tricksWon - contractGoal
+	
+	if diff >= 0 {
+		// Won!
+		score = float64(contractGoal*10 + diff*5)
+	} else {
+		// Lost!
+		// "loses on a 7-hearts bid by capturing only 6 tricks. That would be -7*10 = -70"
+		// "Had they only captured 5 tricks, that would be -7*10 – 1*5 = -75"
+		score = float64(-contractGoal * 10)
+		if diff < -1 {
+			score += float64((diff + 1) * 5)
+		}
+	}
+
+	// Multipliers
+	if g.Contract.IsNoTrump {
+		score *= 2
+	}
+	if g.IsNoFriend {
+		score *= 2
+	}
+	if contractGoal == 10 {
+		score *= 2
+	}
+
+	// Cap at 800/-800 as per user rule
+	if score > 800 {
+		score = 800
+	}
+	if score < -800 {
+		score = -800
+	}
+
+	friendScore := score / 2.0
+	if g.IsNoFriend {
+		friendScore = 0 // No friend to share with!
+	}
+
+	return score, friendScore
 }
 
 func RankValue(r Rank) int {

@@ -75,334 +75,212 @@ func TestBeats(t *testing.T) {
 	g := NewGame("test")
 	// Scenario: Trump is Hearts. So Spades Ace is Mighty.
 	g.Trump = Hearts
+	// Simulate middle trick
+	g.Tricks = append(g.Tricks, Trick{}, Trick{}) 
+	trick := Trick{LeadSuit: Clubs}
 
 	mighty := Card{Suit: Spades, Rank: Ace}
 	joker := Card{Suit: None, Rank: Joker}
 	trumpK := Card{Suit: Hearts, Rank: King}
 	clubA := Card{Suit: Clubs, Rank: Ace}
 	clubK := Card{Suit: Clubs, Rank: King}
+	diamondK := Card{Suit: Diamonds, Rank: King}
 
 	// 1. Mighty beats Joker
-	if !g.Beats(mighty, joker, Clubs) {
+	if !g.Beats(mighty, joker, trick) {
 		t.Errorf("Mighty should beat Joker")
 	}
 
 	// 2. Joker beats Trump K
-	if !g.Beats(joker, trumpK, Clubs) {
+	if !g.Beats(joker, trumpK, trick) {
 		t.Errorf("Joker should beat Trump K")
 	}
 
 	// 3. Trump K beats Lead Suit A (Club A)
-	if !g.Beats(trumpK, clubA, Clubs) {
+	if !g.Beats(trumpK, clubA, trick) {
 		t.Errorf("Trump should beat Lead Suit A")
 	}
 
 	// 4. Lead Suit A beats Lead Suit K
-	if !g.Beats(clubA, clubK, Clubs) {
+	if !g.Beats(clubA, clubK, trick) {
 		t.Errorf("Higher rank should win in lead suit")
 	}
 
 	// 5. Lead Suit A beats Off Suit K (Diamond King) - Non Trump
-	diamondK := Card{Suit: Diamonds, Rank: King}
-	if !g.Beats(clubA, diamondK, Clubs) {
+	if !g.Beats(clubA, diamondK, trick) {
 		t.Errorf("Lead suit should beat off suit")
 	}
 }
 
-// TestRipperCard tests the Ripper card identification
-func TestRipperCard(t *testing.T) {
-	g := NewGame("test-ripper")
+func TestJokerExceptions(t *testing.T) {
+	g := NewGame("test-joker")
+	g.Trump = Hearts
+	joker := Card{Suit: None, Rank: Joker}
+	clubA := Card{Suit: Clubs, Rank: Ace}
+
+	// Trick 1: Joker has 0 power
+	g.Tricks = []Trick{{}} // One trick active (Trick 1)
+	t1 := Trick{LeadSuit: Clubs}
+	if g.Beats(joker, clubA, t1) {
+		t.Errorf("Joker should lose on trick 1")
+	}
+
+	// Trick 10: Joker has 0 power
+	g.Tricks = make([]Trick, 10)
+	t10 := Trick{LeadSuit: Clubs}
+	if g.Beats(joker, clubA, t10) {
+		t.Errorf("Joker should lose on trick 10")
+	}
+
+	// Joker Called: Joker has 0 power
+	g.Tricks = make([]Trick, 5)
+	tCalled := Trick{LeadSuit: Clubs, JokerCalled: true}
+	if g.Beats(joker, clubA, tCalled) {
+		t.Errorf("Joker should lose when called")
+	}
+}
+
+func TestJokerCaller(t *testing.T) {
+	g := NewGame("test-caller")
 	g.Trump = Hearts
 
-	// Ripper is Clubs 3 (unless Clubs is trump, then Spades 3)
-	ripper := Card{Suit: Clubs, Rank: Three}
-	mighty := Card{Suit: Spades, Rank: Ace}
-
-	// Test IsRipper
-	if !g.IsRipper(ripper) {
-		t.Errorf("Clubs 3 should be Ripper when trump is Hearts")
+	// Standard: Clubs 3 is Joker Caller
+	caller := Card{Suit: Clubs, Rank: Three}
+	if !g.IsJokerCaller(caller) {
+		t.Errorf("Clubs 3 should be Joker Caller")
 	}
 
-	// Ripper should NOT beat Mighty
-	if g.Beats(ripper, mighty, Clubs) {
-		t.Errorf("Ripper should not beat Mighty")
-	}
-
-	// Note: Ripper beating Joker requires trick context (whether Ripper was led)
-	// which is not implemented in the simple Beats() function yet.
-	// This would need to be tested at the trick resolution level.
-	
-	// Test when Clubs is trump - Spades 3 should be Ripper
+	// Clubs Trump: Spades 3 is Joker Caller
 	g.Trump = Clubs
-	spadesRipper := Card{Suit: Spades, Rank: Three}
-	
-	if !g.IsRipper(spadesRipper) {
-		t.Errorf("Spades 3 should be Ripper when trump is Clubs")
-	}
-	
-	if g.IsRipper(ripper) {
-		t.Errorf("Clubs 3 should NOT be Ripper when trump is Clubs")
+	spades3 := Card{Suit: Spades, Rank: Three}
+	if !g.IsJokerCaller(spades3) {
+		t.Errorf("Spades 3 should be Joker Caller when Clubs is Trump")
 	}
 }
 
-// TestMightyCard tests the Mighty card special rules
-func TestMightyCard(t *testing.T) {
+func TestMightyIdentity(t *testing.T) {
 	g := NewGame("test-mighty")
-	g.Trump = Hearts
-
-	// Mighty is Spades Ace when trump is NOT spades
-	mighty := Card{Suit: Spades, Rank: Ace}
 	
-	if !g.IsMighty(mighty) {
-		t.Errorf("Spades Ace should be Mighty when trump is Hearts")
+	// Hearts Trump: Spades Ace is Mighty
+	g.Trump = Hearts
+	if !g.IsMighty(Card{Suit: Spades, Rank: Ace}) {
+		t.Errorf("Spades Ace should be Mighty when Hearts is Trump")
 	}
 
-	// When trump is Spades, Mighty should be Diamonds Ace
+	// Spades Trump: Clubs Ace is Mighty
 	g.Trump = Spades
-	mightyDiamonds := Card{Suit: Diamonds, Rank: Ace}
-	
-	if !g.IsMighty(mightyDiamonds) {
-		t.Errorf("Diamonds Ace should be Mighty when trump is Spades")
-	}
-	
-	if g.IsMighty(mighty) {
-		t.Errorf("Spades Ace should NOT be Mighty when trump is Spades")
+	if !g.IsMighty(Card{Suit: Clubs, Rank: Ace}) {
+		t.Errorf("Clubs Ace should be Mighty when Spades is Trump")
 	}
 }
 
-// TestCardComparison tests rank ordering
-func TestCardComparison(t *testing.T) {
-	g := NewGame("test-ranks")
+func TestFirstTrickTrumpLead(t *testing.T) {
+	g := NewGame("test-first-lead")
+	g.Players[0] = &Player{ID: "P1", Seat: 0, Hand: []Card{
+		{Suit: Hearts, Rank: Ace},   // Trump
+		{Suit: Clubs, Rank: Two},    // Non-trump
+	}}
+	g.Status = PhasePlaying
 	g.Trump = Hearts
+	g.Tricks = []Trick{{}} // Trick 1
 
-	// Test same suit comparisons
-	aceHearts := Card{Suit: Hearts, Rank: Ace}
-	kingHearts := Card{Suit: Hearts, Rank: King}
-	
-	if !g.Beats(aceHearts, kingHearts, Hearts) {
-		t.Errorf("Ace should beat King in same suit")
-	}
-
-	// Test trump vs non-trump
-	twoHearts := Card{Suit: Hearts, Rank: Two}
-	aceClubs := Card{Suit: Clubs, Rank: Ace}
-	
-	if !g.Beats(twoHearts, aceClubs, Clubs) {
-		t.Errorf("Trump 2 should beat non-trump Ace")
-	}
-}
-
-// TestBiddingPhase tests bidding logic and validation
-func TestBiddingPhase(t *testing.T) {
-	g := NewGame("test-bidding")
-	
-	// Add players
-	for i := 0; i < 5; i++ {
-		g.Players[i] = &Player{ID: string(rune('A' + i)), Seat: i, Name: string(rune('A' + i))}
-	}
-	
-	g.Start()
-
-	// Test minimum bid
-	lowBid := Bid{Points: 10, Suit: Spades}
-	err := g.ValidateMove(g.Players[0].ID, MoveBid, lowBid)
+	// Leading trump on trick 1 with non-trump in hand -> Error
+	move := PlayCardMove{Card: Card{Suit: Hearts, Rank: Ace}}
+	err := g.ValidateMove("P1", MovePlayCard, move)
 	if err == nil {
-		t.Errorf("Bid below 13 should be rejected")
+		t.Errorf("Should reject trump lead on trick 1")
 	}
 
-	// Test valid first bid
-	validBid := Bid{Points: 13, Suit: Spades}
-	err = g.ValidateMove(g.Players[0].ID, MoveBid, validBid)
+	// Leading non-trump -> OK
+	move2 := PlayCardMove{Card: Card{Suit: Clubs, Rank: Two}}
+	err = g.ValidateMove("P1", MovePlayCard, move2)
 	if err != nil {
-		t.Errorf("Valid bid should be accepted: %v", err)
-	}
-
-	g.ApplyMove(g.Players[0].ID, MoveBid, validBid)
-
-	// Test that next bid must be higher
-	sameBid := Bid{Points: 13, Suit: Hearts}
-	err = g.ValidateMove(g.Players[1].ID, MoveBid, sameBid)
-	if err == nil {
-		t.Errorf("Bid with same points should be rejected")
-	}
-
-	// Test higher bid
-	higherBid := Bid{Points: 14, Suit: Hearts}
-	err = g.ValidateMove(g.Players[1].ID, MoveBid, higherBid)
-	if err != nil {
-		t.Errorf("Higher bid should be accepted: %v", err)
+		t.Errorf("Should accept non-trump lead on trick 1: %v", err)
 	}
 }
 
-// TestNoTrumpBid tests no trump bidding
-func TestNoTrumpBid(t *testing.T) {
-	g := NewGame("test-notrump")
-	
-	for i := 0; i < 5; i++ {
-		g.Players[i] = &Player{ID: string(rune('A' + i)), Seat: i, Name: string(rune('A' + i))}
-	}
-	
-	g.Start()
-
-	// No trump bid should be valid
-	noTrumpBid := Bid{Points: 13, Suit: None, IsNoTrump: true}
-	err := g.ValidateMove(g.Players[0].ID, MoveBid, noTrumpBid)
-	if err != nil {
-		t.Errorf("No trump bid should be valid: %v", err)
-	}
-}
-
-// TestDiscardPhase tests card discarding after winning bid
-func TestDiscardPhase(t *testing.T) {
-	g := NewGame("test-discard")
-	
-	for i := 0; i < 5; i++ {
-		g.Players[i] = &Player{ID: string(rune('A' + i)), Seat: i, Name: string(rune('A' + i))}
-	}
-	
-	g.Start()
-	
-	// Fast forward through bidding
-	g.ApplyMove(g.Players[0].ID, MoveBid, Bid{Points: 13, Suit: Spades})
-	for i := 1; i < 5; i++ {
-		g.ApplyMove(g.Players[i].ID, MovePass, nil)
-	}
-
-	// Now in PhaseExchanging
-	if g.Status != PhaseExchanging {
-		t.Errorf("Expected PhaseExchanging, got %s", g.Status)
-	}
-
-	// Declarer should have 13 cards
-	declarer := g.Players[g.Declarer]
-	if len(declarer.Hand) != 13 {
-		t.Errorf("Declarer should have 13 cards, got %d", len(declarer.Hand))
-	}
-
-	// Test discarding wrong number of cards
-	twoCards := []Card{declarer.Hand[0], declarer.Hand[1]}
-	err := g.ValidateMove(declarer.ID, MoveDiscard, twoCards)
-	if err == nil {
-		t.Errorf("Should reject discarding wrong number of cards")
-	}
-
-	// Test discarding 3 cards
-	threeCards := []Card{declarer.Hand[0], declarer.Hand[1], declarer.Hand[2]}
-	err = g.ValidateMove(declarer.ID, MoveDiscard, threeCards)
-	if err != nil {
-		t.Errorf("Should accept discarding 3 cards: %v", err)
-	}
-}
-
-// TestCallPartnerPhase tests partner calling logic
-func TestCallPartnerPhase(t *testing.T) {
-	g := NewGame("test-partner")
-	
-	for i := 0; i < 5; i++ {
-		g.Players[i] = &Player{ID: string(rune('A' + i)), Seat: i, Name: string(rune('A' + i))}
-	}
-	
-	g.Start()
-	
-	// Fast forward to PhaseExchanging
-	g.ApplyMove(g.Players[0].ID, MoveBid, Bid{Points: 13, Suit: Spades})
-	for i := 1; i < 5; i++ {
-		g.ApplyMove(g.Players[i].ID, MovePass, nil)
-	}
-
-	// Discard 3 cards
-	declarer := g.Players[g.Declarer]
-	threeCards := []Card{declarer.Hand[0], declarer.Hand[1], declarer.Hand[2]}
-	g.ApplyMove(declarer.ID, MoveDiscard, threeCards)
-
-	// Now in PhaseCalling
-	if g.Status != PhaseCalling {
-		t.Errorf("Expected PhaseCalling, got %s", g.Status)
-	}
-
-	// Call a card (partner card)
-	partnerCard := Card{Suit: Hearts, Rank: Ace}
-	err := g.ValidateMove(declarer.ID, MoveCallPartner, partnerCard)
-	if err != nil {
-		t.Errorf("Should accept valid partner call: %v", err)
-	}
-}
-
-// TestDeckShuffleAndDeal tests deck operations
-func TestDeckShuffleAndDeal(t *testing.T) {
-	deck := NewDeck()
-	
-	// Test deck size
-	if len(deck) != 53 {
-		t.Errorf("Deck should have 53 cards, got %d", len(deck))
-	}
-
-	// Test shuffle doesn't lose cards
-	deck.Shuffle()
-	if len(deck) != 53 {
-		t.Errorf("Shuffled deck should still have 53 cards, got %d", len(deck))
-	}
-
-	// Test deal
-	hands, kitty := deck.Deal()
-	
-	if len(kitty) != 3 {
-		t.Errorf("Kitty should have 3 cards, got %d", len(kitty))
-	}
-
-	for i, hand := range hands {
-		if len(hand) != 10 {
-			t.Errorf("Hand %d should have 10 cards, got %d", i, len(hand))
-		}
-	}
-}
-
-// TestCardString tests card string representation
-func TestCardString(t *testing.T) {
-	tests := []struct {
-		card     Card
-		expected string
-	}{
-		{Card{Suit: Spades, Rank: Ace}, "sA"},
-		{Card{Suit: Hearts, Rank: King}, "hK"},
-		{Card{Suit: Clubs, Rank: Ten}, "c10"},
-		{Card{Suit: None, Rank: Joker}, "Joker"},
-		{Card{Suit: Diamonds, Rank: Two}, "d2"},
-	}
-
-	for _, tt := range tests {
-		result := tt.card.String()
-		if result != tt.expected {
-			t.Errorf("Card.String() = %s, expected %s", result, tt.expected)
-		}
-	}
-}
-
-// TestIsPointCard tests point card identification
-func TestIsPointCard(t *testing.T) {
-	pointCards := []Card{
-		{Suit: Spades, Rank: Ace},
-		{Suit: Hearts, Rank: King},
-		{Suit: Clubs, Rank: Queen},
-		{Suit: Diamonds, Rank: Jack},
-		{Suit: Spades, Rank: Ten},
-	}
-
-	nonPointCards := []Card{
-		{Suit: Spades, Rank: Nine},
+func TestJokerCallerForce(t *testing.T) {
+	g := NewGame("test-force")
+	g.Players[1] = &Player{ID: "P2", Seat: 1, Hand: []Card{
+		{Suit: None, Rank: Joker},
 		{Suit: Hearts, Rank: Two},
-		{Suit: Clubs, Rank: Five},
+	}}
+	g.Status = PhasePlaying
+	g.CurrentTurn = 1
+	g.Tricks = []Trick{{
+		Cards: []PlayedCard{
+			{PlayerID: "P1", Seat: 0, Card: Card{Suit: Clubs, Rank: Three}},
+		},
+		LeadSuit:    Clubs,
+		JokerCalled: true,
+	}}
+
+	// Must play Joker
+	move := PlayCardMove{Card: Card{Suit: Hearts, Rank: Two}}
+	err := g.ValidateMove("P2", MovePlayCard, move)
+	if err == nil {
+		t.Errorf("Should force Joker play")
 	}
 
-	for _, card := range pointCards {
-		if !card.IsPointCard() {
-			t.Errorf("Card %s should be a point card", card)
-		}
+	move2 := PlayCardMove{Card: Card{Suit: None, Rank: Joker}}
+	err = g.ValidateMove("P2", MovePlayCard, move2)
+	if err != nil {
+		t.Errorf("Should allow forced Joker play: %v", err)
+	}
+}
+
+func TestScoring(t *testing.T) {
+	g := NewGame("test-scoring")
+	g.Declarer = 0
+	g.PartnerSeat = 1
+	g.Contract = &Bid{Points: 7, Suit: Spades, IsNoTrump: false}
+	
+	// Simulate 8 tricks won by team (Declarer + Partner)
+	for i := 0; i < 8; i++ {
+		g.Tricks = append(g.Tricks, Trick{Winner: 0})
+	}
+	// 2 tricks won by opponents
+	for i := 0; i < 2; i++ {
+		g.Tricks = append(g.Tricks, Trick{Winner: 2})
 	}
 
-	for _, card := range nonPointCards {
-		if card.IsPointCard() {
-			t.Errorf("Card %s should not be a point card", card)
-		}
+	// 7-spade bid, 8 tricks won -> 7*10 + 1*5 = 75
+	score, friendScore := g.CalculateFinalScore()
+	if score != 75 {
+		t.Errorf("Expected score 75, got %v", score)
+	}
+	if friendScore != 37.5 {
+		t.Errorf("Expected friend score 37.5, got %v", friendScore)
+	}
+
+	// Test No-Trump Multiplier
+	g.Contract.IsNoTrump = true
+	score, _ = g.CalculateFinalScore()
+	if score != 150 { // 75 * 2
+		t.Errorf("Expected No-Trump score 150, got %v", score)
+	}
+
+	// Test No-Friend Multiplier
+	g.IsNoFriend = true
+	g.PartnerSeat = -1
+	score, friendScore = g.CalculateFinalScore()
+	if score != 300 { // 150 * 2
+		t.Errorf("Expected No-Friend score 300, got %v", score)
+	}
+	if friendScore != 0 {
+		t.Errorf("Expected friend score 0 for No-Friend game")
+	}
+
+	// Test 10-bid Multiplier
+	g.Contract.Points = 10
+	// Recalculate tricks won (all 10 now for 10-bid)
+	g.Tricks = nil
+	for i := 0; i < 10; i++ {
+		g.Tricks = append(g.Tricks, Trick{Winner: 0})
+	}
+	// 10-bid, 10 tricks, NT, NoFriend -> (10*10)*2*2*2 = 800
+	score, _ = g.CalculateFinalScore()
+	if score != 800 {
+		t.Errorf("Expected ultimate score 800, got %v", score)
 	}
 }

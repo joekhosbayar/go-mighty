@@ -25,6 +25,12 @@ const (
 	MovePlayCard    MoveType = "play_card"
 )
 
+// PlayCardMove represents the payload for playing a card
+type PlayCardMove struct {
+	Card      Card `json:"card"`
+	CallJoker bool `json:"call_joker"`
+}
+
 // GameConfig holds configuration for the game
 type GameConfig struct {
 	MaxPlayers   int `json:"max_players"`
@@ -89,9 +95,10 @@ type GameState struct {
 
 // Trick represents a single round of 5 cards
 type Trick struct {
-	Cards    []PlayedCard `json:"cards"`
-	LeadSuit Suit         `json:"lead_suit"`
-	Winner   int          `json:"winner"` // Seat index
+	Cards       []PlayedCard `json:"cards"`
+	LeadSuit    Suit         `json:"lead_suit"`
+	Winner      int          `json:"winner"`       // Seat index
+	JokerCalled bool         `json:"joker_called"` // If Joker Caller led and called Joker
 }
 
 type PlayedCard struct {
