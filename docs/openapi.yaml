@@ -8,6 +8,54 @@ servers:
     description: Local development server
 
 paths:
+  /auth/signup:
+    post:
+      summary: Create a new user account
+      operationId: signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignupResponse'
+        '400':
+          description: Invalid request
+        '409':
+          description: User already exists
+        '500':
+          description: Internal server error
+
+  /auth/login:
+    post:
+      summary: Authenticate user and issue JWT
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid credentials
+        '500':
+          description: Internal server error
+
   /games:
     post:
       summary: Create a new game
@@ -173,6 +221,59 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    SignupRequest:
+      type: object
+      required:
+        - username
+        - password
+        - email
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+        email:
+          type: string
+          format: email
+
+    SignupResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    LoginResponse:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+
     Game:
       type: object
       properties:

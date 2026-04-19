@@ -27,11 +27,15 @@ func NewHandler(svc *service.GameService, authSvc *service.AuthService) *Handler
 }
 
 func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
+	if h.authSvc == nil {
+		return nil, errors.New("authentication service is not configured")
+	}
+
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		return nil, errors.New("missing Authorization header")
 	}
-	parts := strings.Split(authHeader, " ")
+	parts := strings.Fields(authHeader)
 	if len(parts) != 2 || parts[0] != "Bearer" {
 		return nil, errors.New("invalid Authorization header format")
 	}
@@ -63,7 +67,19 @@ func (h *Handler) SignupHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
+	json.NewEncoder(w).Encode(struct {
+		ID        string    `json:"id"`
+		Username  string    `json:"username"`
+		Email     string    `json:"email"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}{
+		ID:        user.ID,
+		Username:  user.Username,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+	})
 }
 
 // LoginHandler - POST /auth/login

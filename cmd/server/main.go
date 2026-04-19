@@ -57,15 +57,15 @@ func main() {
 	// 4. API
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
-		jwtSecret = "ucla-super-secret-mighty-key"
+		log.Fatalf("JWT_SECRET must be set")
 	}
 	authSvc := service.NewAuthService(pgStore, jwtSecret)
 	handler := api.NewHandler(svc, authSvc)
 
 	// 5. Router
 	mux := http.NewServeMux()
-        mux.HandleFunc("POST /auth/signup", handler.SignupHandler) 
-        mux.HandleFunc("POST /auth/login", handler.LoginHandler)
+	mux.HandleFunc("POST /auth/signup", handler.SignupHandler)
+	mux.HandleFunc("POST /auth/login", handler.LoginHandler)
 	mux.HandleFunc("POST /games", handler.CreateGameHandler)
 	mux.HandleFunc("POST /games/{id}/join", handler.JoinGameHandler)
 	mux.HandleFunc("POST /games/{id}/move", handler.MoveHandler)
