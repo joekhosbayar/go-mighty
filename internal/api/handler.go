@@ -14,11 +14,69 @@ import (
 )
 
 type Handler struct {
-	svc *service.GameService
+	svc     *service.GameService
+	authSvc *service.AuthService
 }
 
-func NewHandler(svc *service.GameService) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *service.GameService, authSvc *service.AuthService) *Handler {
+	return &Handler{
+		svc:     svc,
+		authSvc: authSvc,
+	}
+}
+
+// SignupHandler - POST /auth/signup
+func (h *Handler) SignupHandler(w http.ResponseWriter, r *http.Request) {
+	type Request struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.authSvc.Signup(r.Context(), req.Username, req.Password, req.Email)
+	if err != nil {
+		if errors.Is(err, service.ErrUserAlreadyExists) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
+}
+
+// LoginHandler - POST /auth/login
+func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	type Request struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	token, err := h.authSvc.Login(r.Context(), req.Username, req.Password)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
 // CreateGameHandler - POST /games
