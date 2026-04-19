@@ -23,6 +23,8 @@ type apiFeature struct {
 	gameState    *game.GameState
 }
 
+const playersPerGame = 5
+
 func parseNamesList(names string) []string {
 	parts := strings.Split(names, ",")
 	playerList := make([]string, 0, len(parts))
@@ -455,7 +457,7 @@ func (a *apiFeature) discardsLeastPowerfulCards(username string, count int) erro
 		return fmt.Errorf("%s has %d cards, cannot discard %d", username, len(a.gameState.Players[seat].Hand), count)
 	}
 
-	// Pick the first N cards as least-powerful heuristic
+	// Pick the first N cards.
 	cards := a.gameState.Players[seat].Hand[:count]
 
 	resp, err := a.client.R().
@@ -488,8 +490,7 @@ func (a *apiFeature) leadsTheFirstTrick(username string) error {
 }
 
 func (a *apiFeature) allPlayersPlayOutTrickLegally(trickNum int) error {
-	// We play 5 cards sequentially
-	for i := 0; i < 5; i++ {
+	for i := 0; i < playersPerGame; i++ {
 		currentSeat := a.gameState.CurrentTurn
 		currentPlayer := a.gameState.Players[currentSeat]
 		// Find username for this player
@@ -501,10 +502,7 @@ func (a *apiFeature) allPlayersPlayOutTrickLegally(trickNum int) error {
 			}
 		}
 
-		token := a.tokens[username]
-
 		// Strategy: Find a legal card
-		// For the very first card of the trick, avoid Trump if possible (Gentleman's rule)
 		var cardToPlay game.Card
 		found := false
 
@@ -557,25 +555,9 @@ func (a *apiFeature) allPlayersPlayOutTrickLegally(trickNum int) error {
 			cardToPlay = currentPlayer.Hand[0]
 		}
 
-		resp, err := a.client.R().
-			SetHeader("Authorization", "Bearer "+token).
-			SetBody(map[string]interface{}{
-				"player_id":      currentPlayer.ID,
-				"move_type":      "play_card",
-				"client_version": a.gameState.Version,
-				"payload": map[string]interface{}{
-					"card": cardToPlay,
-				},
-			}).
-			Post("/games/" + a.activeGameID + "/move")
-
-		if err != nil {
-			return err
+		if err := a.playCard(username, cardToPlay); err != nil {
+			return fmt.Errorf("trick %d, seat %d failed to play %s: %w", trickNum, currentSeat, cardToPlay, err)
 		}
-		if resp.StatusCode() != http.StatusOK {
-			return fmt.Errorf("trick %d, seat %d failed to play %s: %s", trickNum, currentSeat, cardToPlay, resp.String())
-		}
-		json.Unmarshal(resp.Body(), a.gameState)
 	}
 	return nil
 }
@@ -706,10 +688,14 @@ func (a *apiFeature) playCard(username string, card game.Card) error {
 		Post("/games/" + a.activeGameID + "/move")
 
 	a.lastResponse = resp
-	if err == nil && resp.StatusCode() == http.StatusOK {
-		json.Unmarshal(resp.Body(), a.gameState)
+	if err != nil {
+		return err
 	}
-	return err
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("play card request failed: %s", resp.String())
+	}
+	json.Unmarshal(resp.Body(), a.gameState)
+	return nil
 }
 
 func (a *apiFeature) leadsTheAndCallsOutTheJoker(username, cardStr string) error {
@@ -753,8 +739,8 @@ func (a *apiFeature) theShouldWinTheTrick(cardStr string) error {
 
 	// If current trick is in-progress, finish it so winner is available.
 	lastIdx := len(a.gameState.Tricks) - 1
-	if len(a.gameState.Tricks[lastIdx].Cards) > 0 && len(a.gameState.Tricks[lastIdx].Cards) < 5 {
-		cardsNeeded := 5 - len(a.gameState.Tricks[lastIdx].Cards)
+	if len(a.gameState.Tricks[lastIdx].Cards) > 0 && len(a.gameState.Tricks[lastIdx].Cards) < playersPerGame {
+		cardsNeeded := playersPerGame - len(a.gameState.Tricks[lastIdx].Cards)
 		for i := 0; i < cardsNeeded; i++ {
 			seat := a.gameState.CurrentTurn
 			player := a.gameState.Players[seat]
@@ -778,9 +764,9 @@ func (a *apiFeature) theShouldWinTheTrick(cardStr string) error {
 		}
 	}
 
-	completedIdx := len(a.gameState.Tricks) - 1
-	if len(a.gameState.Tricks[completedIdx].Cards) == 0 && completedIdx > 0 {
-		completedIdx--
+	completedIdx := a.lastCompletedTrickIndex()
+	if completedIdx < 0 {
+		return fmt.Errorf("no completed trick found")
 	}
 	trick := a.gameState.Tricks[completedIdx]
 	if trick.Winner == -1 {
@@ -795,6 +781,18 @@ func (a *apiFeature) theShouldWinTheTrick(cardStr string) error {
 		}
 	}
 	return fmt.Errorf("winner seat %d card not found in trick", trick.Winner)
+}
+
+func (a *apiFeature) lastCompletedTrickIndex() int {
+	if len(a.gameState.Tricks) == 0 {
+		return -1
+	}
+	completedIdx := len(a.gameState.Tricks) - 1
+	// Current service appends an empty trick after each completed trick except the final one.
+	if completedIdx > 0 && len(a.gameState.Tricks[completedIdx].Cards) == 0 {
+		completedIdx--
+	}
+	return completedIdx
 }
 
 func (a *apiFeature) shouldBeTheNextTurn(username string) error {

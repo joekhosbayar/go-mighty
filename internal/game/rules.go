@@ -453,7 +453,15 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 			if len(g.Tricks) == 10 {
 				g.Status = PhaseFinished
 				declarerScore, partnerScore := g.CalculateFinalScore()
-				if g.Players[g.Declarer] != nil {
+				g.Scores = make(map[string]int, len(g.Players))
+				for _, player := range g.Players {
+					if player != nil {
+						g.Scores[player.ID] = 0
+					}
+				}
+				// This score model stores the declarer/friend team result for the round.
+				// Opponents are explicitly kept at 0 in this per-round map.
+				if g.Declarer >= 0 && g.Declarer < len(g.Players) && g.Players[g.Declarer] != nil {
 					g.Scores[g.Players[g.Declarer].ID] = int(declarerScore)
 				}
 				if g.PartnerSeat >= 0 && g.PartnerSeat < len(g.Players) && g.Players[g.PartnerSeat] != nil {
