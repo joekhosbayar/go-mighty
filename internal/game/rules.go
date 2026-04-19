@@ -238,6 +238,13 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 	if card.Suit != lead {
 		// Allowed if playing Mighty or Joker
 		if g.IsMighty(card) || card.Rank == Joker {
+			// Special Rule: First Hand Mighty Restriction
+			if len(g.Tricks) == 1 && g.IsMighty(card) {
+				// "cannot play mighty on your first hand, unless that is the only card you have that matches the lead suit"
+				if p.HasSuit(lead) {
+					return fmt.Errorf("%w: cannot play mighty on first trick if you can follow suit", ErrInvalidMove)
+				}
+			}
 			return nil
 		}
 
