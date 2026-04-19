@@ -1,3 +1,20 @@
+CREATE TABLE users (
+    id VARCHAR(64) PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    email VARCHAR(255) UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE user_stats (
+    user_id VARCHAR(64) PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    games_played INT DEFAULT 0,
+    games_won INT DEFAULT 0,
+    total_points DOUBLE PRECISION DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 CREATE TABLE games (
     id VARCHAR(64) PRIMARY KEY,
     status VARCHAR(32) NOT NULL,
