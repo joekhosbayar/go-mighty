@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
@@ -23,6 +24,18 @@ func NewHandler(svc *service.GameService, authSvc *service.AuthService) *Handler
 		svc:     svc,
 		authSvc: authSvc,
 	}
+}
+
+func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return nil, errors.New("missing Authorization header")
+	}
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return nil, errors.New("invalid Authorization header format")
+	}
+	return h.authSvc.ValidateToken(parts[1])
 }
 
 // SignupHandler - POST /auth/signup
@@ -102,12 +115,16 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 
 // JoinGameHandler - POST /games/{id}/join
 func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
-	gameID := r.PathValue("id") // Go 1.22
+	claims, err := h.authenticate(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	gameID := r.PathValue("id")
 
 	type Request struct {
-		PlayerID string `json:"player_id"`
-		Name     string `json:"name"`
-		Seat     int    `json:"seat"`
+		Seat int `json:"seat"`
 	}
 	var req Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -115,7 +132,7 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	g, err := h.svc.JoinGame(r.Context(), gameID, req.PlayerID, req.Name, req.Seat)
+	g, err := h.svc.JoinGame(r.Context(), gameID, claims.UserID, claims.Username, req.Seat)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -136,11 +136,11 @@ func TestLoggingResponseWriter_MultipleWrites(t *testing.T) {
 // TestLoggingMiddleware tests the logging middleware with various response scenarios
 func TestLoggingMiddleware(t *testing.T) {
 	tests := []struct {
-		name           string
-		handler        http.HandlerFunc
-		expectedCode   int
-		expectedBody   string
-		checkDuration  bool
+		name          string
+		handler       http.HandlerFunc
+		expectedCode  int
+		expectedBody  string
+		checkDuration bool
 	}{
 		{
 			name: "SuccessfulResponse",
@@ -329,7 +329,7 @@ func TestLoggingResponseWriter_WriteHeaderOnlyOnce(t *testing.T) {
 
 	// Second call should be ignored by both the wrapper and underlying ResponseWriter
 	lrw.WriteHeader(http.StatusBadRequest)
-	
+
 	// The wrapper should still have the first status code
 	if lrw.responseCode != http.StatusOK {
 		t.Errorf("Expected responseCode to remain 200, got %d", lrw.responseCode)
@@ -430,4 +430,3 @@ func (m *mockConn) RemoteAddr() net.Addr               { return nil }
 func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
 func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
 func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
-
