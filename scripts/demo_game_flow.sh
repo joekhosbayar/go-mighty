@@ -34,8 +34,7 @@ for i in "${!USERS[@]}"; do
     exit 1
   fi
 
-  USER_ID=$(jq -r '.id' <<< "$REG_RES")
-  if [ -z "$USER_ID" ] || [ "$USER_ID" = "null" ]; then
+  if ! USER_ID=$(jq -er '.id' <<< "$REG_RES"); then
     echo "Signup failed to return a valid user id for ${USERNAME}:"
     echo "$REG_RES"
     exit 1
@@ -54,8 +53,7 @@ for i in "${!USERS[@]}"; do
     exit 1
   fi
 
-  TOKEN=$(jq -r '.token' <<< "$LOGIN_RES")
-  if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+  if ! TOKEN=$(jq -er '.token' <<< "$LOGIN_RES"); then
     echo "Login failed to return a valid token for ${USERNAME}:"
     echo "$LOGIN_RES"
     exit 1
