@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -11,18 +12,47 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
+	"github.com/redis/go-redis/v9"
 )
 
+type fakeRedisStore struct {
+	games map[string]*game.GameState
+}
+
+func (f *fakeRedisStore) SaveGame(ctx context.Context, g *game.GameState) error { return nil }
+func (f *fakeRedisStore) LoadGame(ctx context.Context, gameID string) (*game.GameState, error) {
+	if g, ok := f.games[gameID]; ok {
+		return g, nil
+	}
+	return nil, nil
+}
+func (f *fakeRedisStore) AcquireLock(ctx context.Context, gameID string) (bool, error) {
+	return true, nil
+}
+func (f *fakeRedisStore) ReleaseLock(ctx context.Context, gameID string) error { return nil }
+func (f *fakeRedisStore) CheckVersion(ctx context.Context, gameID string, clientVersion int64) error {
+	return nil
+}
+func (f *fakeRedisStore) PublishEvent(ctx context.Context, gameID string, event interface{}) error {
+	return nil
+}
+func (f *fakeRedisStore) Subscribe(ctx context.Context, gameID string) *redis.PubSub { return nil }
+
 func setupLobbyTestEnv(t *testing.T) (*Handler, sqlmock.Sqlmock, *sql.DB) {
+	return setupLobbyTestEnvWithRedis(t, &fakeRedisStore{games: map[string]*game.GameState{}})
+}
+
+func setupLobbyTestEnvWithRedis(t *testing.T, redisStore service.RedisStore) (*Handler, sqlmock.Sqlmock, *sql.DB) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
 	}
 
 	pgStore := postgres.NewStoreWithDB(db)
-	svc := service.NewGameService(nil, pgStore) // redisStore is nil, returns empty games
+	svc := service.NewGameService(redisStore, pgStore)
 	authSvc := service.NewAuthService(pgStore, "testsecret")
 	handler := NewHandler(svc, authSvc)
 
@@ -44,7 +74,13 @@ func generateValidToken(userID, username string) string {
 }
 
 func TestListGamesHandler_Success(t *testing.T) {
-	handler, mock, db := setupLobbyTestEnv(t)
+	redisStore := &fakeRedisStore{
+		games: map[string]*game.GameState{
+			"game-123": {ID: "game-123", Status: game.PhaseWaiting},
+			"game-456": {ID: "game-456", Status: game.PhaseWaiting},
+		},
+	}
+	handler, mock, db := setupLobbyTestEnvWithRedis(t, redisStore)
 	defer db.Close()
 
 	// Mock the postgres query for waiting games
@@ -65,14 +101,16 @@ func TestListGamesHandler_Success(t *testing.T) {
 		t.Errorf("expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
 	}
 
-	var resp []interface{}
+	var resp []*game.GameState
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	// Since redisStore is nil, it returns an empty slice of games rather than panicking
-	if len(resp) != 0 {
-		t.Errorf("expected empty games array (mocked), got %d games", len(resp))
+	if len(resp) != 2 {
+		t.Fatalf("expected 2 games, got %d", len(resp))
+	}
+	if resp[0].ID != "game-123" || resp[1].ID != "game-456" {
+		t.Fatalf("unexpected game ids in response: %+v", resp)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -97,6 +135,20 @@ func TestJoinGameHandler_Unauthorized_NoToken(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected status %d, got %d. Body: %s", http.StatusUnauthorized, rec.Code, rec.Body.String())
+	}
+}
+
+func TestListGamesHandler_InvalidStatus(t *testing.T) {
+	handler, _, db := setupLobbyTestEnv(t)
+	defer db.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/games?status=unknown", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ListGamesHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
 	}
 }
 

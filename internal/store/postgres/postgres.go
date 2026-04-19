@@ -90,7 +90,19 @@ func (s *Store) UpdateGameStatus(ctx context.Context, gameID string, status game
 	return err
 }
 
-func (s *Store) ListGamesByStatus(ctx context.Context, status game.Phase) ([]string, error) {
+func (s *Store) ListGamesByStatus(ctx context.Context, status game.Phase) (ids []string, err error) {
+	start := time.Now()
+	defer func() {
+		log.Debug().
+			Str("component", "postgres").
+			Str("op", "ListGamesByStatus").
+			Str("status", string(status)).
+			Int("count", len(ids)).
+			Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("ListGamesByStatus")
+	}()
+
 	query := `SELECT id FROM games WHERE status = $1 ORDER BY created_at DESC LIMIT 50`
 	rows, err := s.db.QueryContext(ctx, query, status)
 	if err != nil {
@@ -98,7 +110,6 @@ func (s *Store) ListGamesByStatus(ctx context.Context, status game.Phase) ([]str
 	}
 	defer rows.Close()
 
-	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {

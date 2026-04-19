@@ -234,6 +234,10 @@ func (h *Handler) GetGameHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
 	g, err := h.svc.GetGame(r.Context(), gameID)
 	if err != nil {
+		if errors.Is(err, service.ErrRedisStoreNotInitialized) {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -249,8 +253,20 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 		statusParam = string(game.PhaseWaiting)
 	}
 
-	games, err := h.svc.ListGamesByStatus(r.Context(), game.Phase(statusParam))
+	status := game.Phase(statusParam)
+	switch status {
+	case game.PhaseWaiting, game.PhaseBidding, game.PhaseExchanging, game.PhaseCalling, game.PhasePlaying, game.PhaseFinished:
+	default:
+		http.Error(w, "invalid status", http.StatusBadRequest)
+		return
+	}
+
+	games, err := h.svc.ListGamesByStatus(r.Context(), status)
 	if err != nil {
+		if errors.Is(err, service.ErrRedisStoreNotInitialized) {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

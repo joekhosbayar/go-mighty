@@ -2,21 +2,34 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
-	redisstore "github.com/joekhosbayar/go-mighty/internal/store/redis"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 )
 
+var ErrRedisStoreNotInitialized = errors.New("redis store not initialized")
+
+type RedisStore interface {
+	SaveGame(ctx context.Context, g *game.GameState) error
+	LoadGame(ctx context.Context, gameID string) (*game.GameState, error)
+	AcquireLock(ctx context.Context, gameID string) (bool, error)
+	ReleaseLock(ctx context.Context, gameID string) error
+	CheckVersion(ctx context.Context, gameID string, clientVersion int64) error
+	PublishEvent(ctx context.Context, gameID string, event interface{}) error
+	Subscribe(ctx context.Context, gameID string) *redis.PubSub
+}
+
 type GameService struct {
-	redisStore    *redisstore.Store
+	redisStore    RedisStore
 	postgresStore *postgres.Store
 }
 
-func NewGameService(r *redisstore.Store, p *postgres.Store) *GameService {
+func NewGameService(r RedisStore, p *postgres.Store) *GameService {
 	return &GameService{
 		redisStore:    r,
 		postgresStore: p,
@@ -174,29 +187,27 @@ func (s *GameService) Subscribe(ctx context.Context, gameID string) *redis.PubSu
 // GetGame retrieves game state
 func (s *GameService) GetGame(ctx context.Context, gameID string) (*game.GameState, error) {
 	if s.redisStore == nil {
-		return nil, fmt.Errorf("redis store not initialized")
+		return nil, ErrRedisStoreNotInitialized
 	}
 	return s.redisStore.LoadGame(ctx, gameID)
 }
 
 // ListGamesByStatus retrieves a list of games with the specified status
 func (s *GameService) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error) {
+	if s.redisStore == nil {
+		return nil, ErrRedisStoreNotInitialized
+	}
+
 	ids, err := s.postgresStore.ListGamesByStatus(ctx, status)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list games from db: %w", err)
 	}
 
 	var games []*game.GameState
-	if s.redisStore == nil {
-		// Mock behavior for tests when redis is not available
-		return games, nil
-	}
-
 	for _, id := range ids {
 		g, err := s.redisStore.LoadGame(ctx, id)
 		if err != nil {
-			// Log error but continue
-			fmt.Printf("failed to load game %s from redis: %v\n", id, err)
+			log.Warn().Str("game_id", id).Err(err).Msg("failed to load game from redis")
 			continue
 		}
 		if g != nil {
