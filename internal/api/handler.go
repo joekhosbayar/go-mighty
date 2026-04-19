@@ -66,7 +66,7 @@ func (h *Handler) authenticateWS(r *http.Request) (*service.AuthClaims, error) {
 
 	tokenString := r.URL.Query().Get("token")
 	if tokenString == "" {
-		return nil, err
+		return nil, errors.New("missing authentication token")
 	}
 
 	return h.authSvc.ValidateToken(tokenString)

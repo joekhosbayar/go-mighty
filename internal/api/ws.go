@@ -75,7 +75,12 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Create a channel to signal connection closure
 	done := make(chan struct{})
-	var writeMu sync.Mutex
+	var wsWriteMu sync.Mutex
+	sendError := func(errMsg string) {
+		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
+			log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
+		}
+	}
 
 	// Write loop
 	go func() {
@@ -86,9 +91,9 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			case <-done:
 				return
 			case <-ticker.C:
-				writeMu.Lock()
+				wsWriteMu.Lock()
 				err := conn.WriteMessage(websocket.PingMessage, nil)
-				writeMu.Unlock()
+				wsWriteMu.Unlock()
 				if err != nil {
 					return
 				}
@@ -97,9 +102,9 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 					return // pubsub closed
 				}
 				// msg.Payload is the JSON string from Redis
-				writeMu.Lock()
+				wsWriteMu.Lock()
 				err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
-				writeMu.Unlock()
+				wsWriteMu.Unlock()
 				if err != nil {
 					return
 				}
@@ -119,26 +124,20 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 		var inMsg IncomingWSMessage
 		if err := json.Unmarshal(message, &inMsg); err != nil {
-			if wsErr := h.sendWSError(conn, "invalid message format", &writeMu); wsErr != nil {
-				log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
-			}
+			sendError("invalid message format")
 			continue
 		}
 
 		if inMsg.Type == "MOVE" {
 			convertedPayload, err := ConvertPayload(inMsg.MoveType, inMsg.Payload)
 			if err != nil {
-				if wsErr := h.sendWSError(conn, "invalid payload structure: "+err.Error(), &writeMu); wsErr != nil {
-					log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
-				}
+				sendError("invalid payload structure: " + err.Error())
 				continue
 			}
 
 			_, err = h.svc.ProcessMove(r.Context(), gameID, claims.UserID, inMsg.MoveType, convertedPayload, inMsg.ClientVersion)
 			if err != nil {
-				if wsErr := h.sendWSError(conn, err.Error(), &writeMu); wsErr != nil {
-					log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
-				}
+				sendError(err.Error())
 				continue
 			}
 			// On success, the GameService publishes an event via Redis,

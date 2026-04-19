@@ -24,6 +24,7 @@ type fakeWSGameService struct {
 	mu                sync.Mutex
 	redisClient       *redis.Client
 	processMoveCalled bool
+	processMoveCh     chan struct{}
 	processMoveErr    error
 }
 
@@ -39,6 +40,10 @@ func (f *fakeWSGameService) ProcessMove(ctx context.Context, gameID, playerID st
 	f.mu.Lock()
 	f.processMoveCalled = true
 	f.mu.Unlock()
+	select {
+	case f.processMoveCh <- struct{}{}:
+	default:
+	}
 
 	if f.processMoveErr != nil {
 		return nil, f.processMoveErr
@@ -75,10 +80,19 @@ func (f *fakeWSGameService) ListGamesByStatus(ctx context.Context, status game.P
 	return nil, nil
 }
 
-func (f *fakeWSGameService) MoveCalled() bool {
+func (f *fakeWSGameService) WasProcessMoveCalled() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.processMoveCalled
+}
+
+func (f *fakeWSGameService) WaitForProcessMove(timeout time.Duration) bool {
+	select {
+	case <-f.processMoveCh:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 func setupWSTestHandler(t *testing.T) (*Handler, func()) {
@@ -87,7 +101,10 @@ func setupWSTestHandler(t *testing.T) (*Handler, func()) {
 	mini := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
 
-	svc := &fakeWSGameService{redisClient: client}
+	svc := &fakeWSGameService{
+		redisClient:   client,
+		processMoveCh: make(chan struct{}, 1),
+	}
 	authSvc := service.NewAuthService(&postgres.Store{}, "testsecret")
 	handler := NewHandler(svc, authSvc)
 
@@ -233,11 +250,7 @@ func TestWSHandler_ValidMoveCallsProcessMoveAndForwardsEvent(t *testing.T) {
 		t.Fatalf("failed to write valid move: %v", err)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for !svc.MoveCalled() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !svc.MoveCalled() {
+	if !svc.WaitForProcessMove(2*time.Second) || !svc.WasProcessMoveCalled() {
 		t.Fatal("expected ProcessMove to be called")
 	}
 
@@ -270,7 +283,9 @@ func (c *websocketConn) WriteJSON(v interface{}) error {
 
 func (c *websocketConn) ReadText(t *testing.T) wsErrorMessage {
 	t.Helper()
-	_ = c.setReadDeadline(2 * time.Second)
+	if err := c.setReadDeadline(2 * time.Second); err != nil {
+		t.Fatalf("failed to set websocket read deadline: %v", err)
+	}
 	_, data, err := c.Conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("failed to read websocket message: %v", err)
@@ -284,7 +299,9 @@ func (c *websocketConn) ReadText(t *testing.T) wsErrorMessage {
 
 func (c *websocketConn) ReadRawText(t *testing.T) string {
 	t.Helper()
-	_ = c.setReadDeadline(2 * time.Second)
+	if err := c.setReadDeadline(2 * time.Second); err != nil {
+		t.Fatalf("failed to set websocket read deadline: %v", err)
+	}
 	_, data, err := c.Conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("failed to read websocket message: %v", err)
