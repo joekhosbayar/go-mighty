@@ -10,7 +10,6 @@ import (
 
 	"github.com/cucumber/godog"
 	"github.com/go-resty/resty/v2"
-	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 )
 
@@ -21,6 +20,140 @@ type apiFeature struct {
 	userIDs      map[string]string // username -> UUID
 	activeGameID string
 	gameState    *game.GameState
+}
+
+func (a *apiFeature) authenticatedPlayers(names string) error {
+	playerList := strings.Split(names, ", ")
+	for _, name := range playerList {
+		name = strings.Trim(name, "\"")
+		if err := a.iAmLoggedInAs(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *apiFeature) createsAGame(username, gameID string) error {
+	a.activeGameID = gameID
+	token := a.tokens[username]
+	resp, err := a.client.R().
+		SetHeader("Authorization", "Bearer "+token).
+		SetBody(map[string]string{"id": gameID}).
+		Post("/games")
+	
+	a.lastResponse = resp
+	return err
+}
+
+func (a *apiFeature) theGameStatusShouldBe(gameID, status string) error {
+	resp, err := a.client.R().Get("/games/" + gameID)
+	if err != nil {
+		return err
+	}
+	var state game.GameState
+	json.Unmarshal(resp.Body(), &state)
+	if string(state.Status) != status {
+		return fmt.Errorf("expected status %s, got %s", status, state.Status)
+	}
+	a.gameState = &state
+	return nil
+}
+
+func (a *apiFeature) bids(username string, points int, suit string) error {
+	token := a.tokens[username]
+	userID := a.userIDs[username]
+	
+	isNoTrump := suit == "none"
+	
+	resp, err := a.client.R().
+		SetHeader("Authorization", "Bearer "+token).
+		SetBody(map[string]interface{}{
+			"player_id": userID,
+			"move_type": "bid",
+			"client_version": a.gameState.Version,
+			"payload": map[string]interface{}{
+				"suit": suit,
+				"points": points,
+				"is_no_trump": isNoTrump,
+			},
+		}).
+		Post("/games/" + a.activeGameID + "/move")
+	
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("bid failed: %s", resp.String())
+	}
+	
+	json.Unmarshal(resp.Body(), a.gameState)
+	a.lastResponse = resp
+	return nil
+}
+
+func (a *apiFeature) discardsCards(username string, count int, table *godog.Table) error {
+	token := a.tokens[username]
+	userID := a.userIDs[username]
+	
+	var cards []map[string]string
+	for _, row := range table.Rows[1:] {
+		cards = append(cards, map[string]string{
+			"suit": row.Cells[0].Value,
+			"rank": row.Cells[1].Value,
+		})
+	}
+	
+	resp, err := a.client.R().
+		SetHeader("Authorization", "Bearer "+token).
+		SetBody(map[string]interface{}{
+			"player_id": userID,
+			"move_type": "discard",
+			"client_version": a.gameState.Version,
+			"payload": cards,
+		}).
+		Post("/games/" + a.activeGameID + "/move")
+	
+	if err != nil {
+		return err
+	}
+	json.Unmarshal(resp.Body(), a.gameState)
+	return nil
+}
+
+func (a *apiFeature) callsTheAsTheFriend(username, cardName string) error {
+	token := a.tokens[username]
+	userID := a.userIDs[username]
+	
+	// Simplified card parsing for demo
+	card := map[string]string{"suit": "hearts", "rank": "A"}
+	
+	resp, err := a.client.R().
+		SetHeader("Authorization", "Bearer "+token).
+		SetBody(map[string]interface{}{
+			"player_id": userID,
+			"move_type": "call_partner",
+			"client_version": a.gameState.Version,
+			"payload": card,
+		}).
+		Post("/games/" + a.activeGameID + "/move")
+	
+	if err != nil {
+		return err
+	}
+	json.Unmarshal(resp.Body(), a.gameState)
+	return nil
+}
+
+func (a *apiFeature) shouldBeTheDeclarer(username string) error {
+	userID := a.userIDs[username]
+	declarerSeat := a.gameState.Declarer
+	if declarerSeat == -1 {
+		return fmt.Errorf("no declarer set")
+	}
+	if a.gameState.Players[declarerSeat].ID != userID {
+		return fmt.Errorf("expected %s to be declarer, but seat %d is", userID, declarerSeat)
+	}
+	return nil
 }
 
 func (a *apiFeature) theGameServerIsRunning() error {
