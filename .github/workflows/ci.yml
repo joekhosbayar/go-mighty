@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: Create secrets directory
+      run: mkdir -p secrets
+
+    - name: Set up Postgres password
+      run: echo "mightypassword" > secrets/postgres_password.txt
+
+    - name: Build and run services
+      run: docker-compose up -d
+
+    - name: Wait for services to be healthy
+      run: |
+        for i in {1..30}; do
+          if curl -s http://localhost:8080/games > /dev/null; then
+            echo "Server is up!"
+            exit 0
+          fi
+          echo "Waiting for server... ($i/30)"
+          sleep 2
+        done
+        echo "Server failed to start"
+        docker-compose logs
+        exit 1
+
+    - name: Run Unit Tests
+      run: go test -v ./internal/...
+
+    - name: Run E2E Gherkin tests
+      run: go test -v ./tests/e2e/...
+
+    - name: Shutdown services
+      if: always()
+      run: docker-compose down
