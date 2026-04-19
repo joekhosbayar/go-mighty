@@ -24,7 +24,7 @@ jobs:
       run: echo "mightypassword" > secrets/postgres_password.txt
 
     - name: Build and run services
-      run: docker-compose up -d
+      run: docker compose up -d
 
     - name: Wait for services to be healthy
       run: |
@@ -37,7 +37,7 @@ jobs:
           sleep 2
         done
         echo "Server failed to start"
-        docker-compose logs
+        docker compose logs
         exit 1
 
     - name: Run Unit Tests
@@ -48,4 +48,4 @@ jobs:
 
     - name: Shutdown services
       if: always()
-      run: docker-compose down
+      run: docker compose down
