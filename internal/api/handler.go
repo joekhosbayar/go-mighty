@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -11,15 +12,25 @@ import (
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 )
 
+type GameService interface {
+	CreateGame(ctx context.Context, id string) (*game.GameState, error)
+	JoinGame(ctx context.Context, gameID, playerID, playerName string, seat int) (*game.GameState, error)
+	ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.GameState, error)
+	Subscribe(ctx context.Context, gameID string) *redis.PubSub
+	GetGame(ctx context.Context, gameID string) (*game.GameState, error)
+	ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error)
+}
+
 type Handler struct {
-	svc     *service.GameService
+	svc     GameService
 	authSvc *service.AuthService
 }
 
-func NewHandler(svc *service.GameService, authSvc *service.AuthService) *Handler {
+func NewHandler(svc GameService, authSvc *service.AuthService) *Handler {
 	return &Handler{
 		svc:     svc,
 		authSvc: authSvc,
@@ -31,15 +42,34 @@ func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
 		return nil, errors.New("authentication service is not configured")
 	}
 
+	tokenString := ""
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return nil, errors.New("missing Authorization header")
+	if authHeader != "" {
+		parts := strings.Fields(authHeader)
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			tokenString = parts[1]
+		}
 	}
-	parts := strings.Fields(authHeader)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		return nil, errors.New("invalid Authorization header format")
+
+	if tokenString == "" {
+		return nil, errors.New("missing authentication token")
 	}
-	return h.authSvc.ValidateToken(parts[1])
+
+	return h.authSvc.ValidateToken(tokenString)
+}
+
+func (h *Handler) authenticateWS(r *http.Request) (*service.AuthClaims, error) {
+	claims, err := h.authenticate(r)
+	if err == nil {
+		return claims, nil
+	}
+
+	tokenString := r.URL.Query().Get("token")
+	if tokenString == "" {
+		return nil, errors.New("missing authentication token")
+	}
+
+	return h.authSvc.ValidateToken(tokenString)
 }
 
 // SignupHandler - POST /auth/signup

@@ -176,3 +176,24 @@ func TestJoinGameHandler_Unauthorized_InvalidToken(t *testing.T) {
 		t.Errorf("expected status %d, got %d. Body: %s", http.StatusUnauthorized, rec.Code, rec.Body.String())
 	}
 }
+
+func TestJoinGameHandler_Unauthorized_QueryToken(t *testing.T) {
+	handler, _, db := setupLobbyTestEnv(t)
+	defer db.Close()
+
+	payload := map[string]interface{}{
+		"seat": 0,
+	}
+	body, _ := json.Marshal(payload)
+
+	token := generateValidToken("player-1", "alice")
+	req := httptest.NewRequest(http.MethodPost, "/games/game-123/join?token="+token, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.JoinGameHandler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusUnauthorized, rec.Code, rec.Body.String())
+	}
+}

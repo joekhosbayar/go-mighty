@@ -1,11 +1,14 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/rs/zerolog/log"
 )
 
@@ -30,8 +33,28 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// IncomingWSMessage defines the structure of messages sent by the client over WebSocket
+type IncomingWSMessage struct {
+	Type          string        `json:"type"` // e.g., "MOVE"
+	MoveType      game.MoveType `json:"move_type"`
+	Payload       interface{}   `json:"payload"`
+	ClientVersion int64         `json:"client_version"`
+}
+
+// OutgoingWSError defines the structure of error messages sent to the client
+type OutgoingWSError struct {
+	Type  string `json:"type"` // "ERROR"
+	Error string `json:"error"`
+}
+
 // WSHandler handles websocket connections
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
+	claims, err := h.authenticateWS(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	gameID := r.PathValue("id")
 
 	pubsub := h.svc.Subscribe(r.Context(), gameID)
@@ -43,29 +66,98 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
+		log.Error().Str("game_id", gameID).Str("user_id", claims.UserID).Err(err).Msg("Failed to upgrade websocket")
 		return
 	}
 	defer conn.Close()
 
 	ch := pubsub.Channel()
 
-	// Heartbeat
+	// Create a channel to signal connection closure
+	done := make(chan struct{})
+	var wsWriteMu sync.Mutex
+	sendError := func(errMsg string) {
+		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
+			log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
+		}
+	}
+
+	// Write loop
 	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
 		for {
-			time.Sleep(30 * time.Second)
-			err := conn.WriteMessage(websocket.PingMessage, nil)
-			if err != nil {
+			select {
+			case <-done:
 				return
+			case <-ticker.C:
+				wsWriteMu.Lock()
+				err := conn.WriteMessage(websocket.PingMessage, nil)
+				wsWriteMu.Unlock()
+				if err != nil {
+					return
+				}
+			case msg, ok := <-ch:
+				if !ok {
+					return // pubsub closed
+				}
+				// msg.Payload is the JSON string from Redis
+				wsWriteMu.Lock()
+				err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+				wsWriteMu.Unlock()
+				if err != nil {
+					return
+				}
 			}
 		}
 	}()
 
-	for msg := range ch {
-		// msg.Payload is the JSON string
-		err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+	// Read loop
+	for {
+		_, message, err := conn.ReadMessage()
 		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Error().Str("game_id", gameID).Str("user_id", claims.UserID).Err(err).Msg("WebSocket read error")
+			}
 			break
 		}
+
+		var inMsg IncomingWSMessage
+		if err := json.Unmarshal(message, &inMsg); err != nil {
+			sendError("invalid message format")
+			continue
+		}
+
+		if inMsg.Type == "MOVE" {
+			convertedPayload, err := ConvertPayload(inMsg.MoveType, inMsg.Payload)
+			if err != nil {
+				sendError("invalid payload structure: " + err.Error())
+				continue
+			}
+
+			_, err = h.svc.ProcessMove(r.Context(), gameID, claims.UserID, inMsg.MoveType, convertedPayload, inMsg.ClientVersion)
+			if err != nil {
+				sendError(err.Error())
+				continue
+			}
+			// On success, the GameService publishes an event via Redis,
+			// which the write loop will pick up and send to all connected clients.
+		}
 	}
+
+	close(done)
+}
+
+func (h *Handler) sendWSError(conn *websocket.Conn, errMsg string, writeMu *sync.Mutex) error {
+	errPayload := OutgoingWSError{
+		Type:  "ERROR",
+		Error: errMsg,
+	}
+	data, err := json.Marshal(errPayload)
+	if err != nil {
+		return err
+	}
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	return conn.WriteMessage(websocket.TextMessage, data)
 }

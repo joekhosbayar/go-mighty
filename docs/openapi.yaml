@@ -225,6 +225,8 @@ paths:
     get:
       summary: WebSocket connection for game updates
       operationId: connectWS
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -232,9 +234,17 @@ paths:
           schema:
             type: string
           description: The game ID
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+          description: JWT token for authentication (alternative to Authorization header)
       responses:
         '101':
           description: Switching Protocols to WebSocket. The connection will receive JSON Game objects upon updates.
+        '401':
+          description: Unauthorized
 
 components:
   securitySchemes:
@@ -453,3 +463,35 @@ components:
         $ref: '#/components/schemas/Card'
       minItems: 3
       maxItems: 3
+
+    IncomingWSMessage:
+      type: object
+      required:
+        - type
+        - move_type
+      properties:
+        type:
+          type: string
+          description: The type of WebSocket message (e.g., "MOVE")
+          example: "MOVE"
+        move_type:
+          $ref: '#/components/schemas/MoveType'
+        payload:
+          description: The payload depends on the move_type, identical to the /move REST endpoint.
+          oneOf:
+            - $ref: '#/components/schemas/Bid'
+            - $ref: '#/components/schemas/DiscardPayload'
+            - $ref: '#/components/schemas/Card'
+        client_version:
+          type: integer
+          description: The game version the client believes it is acting on
+
+    OutgoingWSError:
+      type: object
+      properties:
+        type:
+          type: string
+          example: "ERROR"
+        error:
+          type: string
+          description: The error message
