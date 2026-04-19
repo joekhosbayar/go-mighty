@@ -15,6 +15,10 @@ type Store struct {
 	db *sql.DB
 }
 
+func NewStoreWithDB(db *sql.DB) *Store {
+	return &Store{db: db}
+}
+
 func NewStore(connStr string) (*Store, error) {
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
@@ -84,4 +88,37 @@ func (s *Store) UpdateGameStatus(ctx context.Context, gameID string, status game
 	query := `UPDATE games SET status = $1, version = $2, updated_at = NOW() WHERE id = $3`
 	_, err = s.db.ExecContext(ctx, query, status, version, gameID)
 	return err
+}
+
+func (s *Store) ListGamesByStatus(ctx context.Context, status game.Phase) (ids []string, err error) {
+	start := time.Now()
+	defer func() {
+		log.Debug().
+			Str("component", "postgres").
+			Str("op", "ListGamesByStatus").
+			Str("status", string(status)).
+			Int("count", len(ids)).
+			Err(err).
+			Dur("latency", time.Since(start)).
+			Msg("ListGamesByStatus")
+	}()
+
+	query := `SELECT id FROM games WHERE status = $1 ORDER BY created_at DESC LIMIT 50`
+	rows, err := s.db.QueryContext(ctx, query, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }

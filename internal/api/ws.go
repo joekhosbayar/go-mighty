@@ -34,25 +34,19 @@ var upgrader = websocket.Upgrader{
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
 
+	pubsub := h.svc.Subscribe(r.Context(), gameID)
+	if pubsub == nil {
+		http.Error(w, "websocket unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer pubsub.Close()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
 		return
 	}
 	defer conn.Close()
-
-	// Subscribe to redis
-	// We need access to redis store from handler.
-	// HACK: We access redis store via service.
-	// Ideally Service exposes Subscribe method or we pass Store to Handler.
-	// I'll assume I can add `GetRedisStore()` to service.
-	// Or I'll just change Handler struct to include redis store if needed?
-	// But Service encapsulates it.
-	// Actually `redis.Store` has `Subscribe`.
-	// I will add `Subscribe(ctx, gameID)` to `GameService`.
-
-	pubsub := h.svc.Subscribe(r.Context(), gameID)
-	defer pubsub.Close()
 
 	ch := pubsub.Channel()
 

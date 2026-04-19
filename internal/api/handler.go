@@ -234,11 +234,50 @@ func (h *Handler) GetGameHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
 	g, err := h.svc.GetGame(r.Context(), gameID)
 	if err != nil {
+		if errors.Is(err, service.ErrRedisStoreNotInitialized) {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(g)
+}
+
+// ListGamesHandler - GET /games
+func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
+	// Query param 'status' (e.g. ?status=waiting)
+	statusParam := r.URL.Query().Get("status")
+	if statusParam == "" {
+		statusParam = string(game.PhaseWaiting)
+	}
+
+	status := game.Phase(statusParam)
+	switch status {
+	case game.PhaseWaiting, game.PhaseBidding, game.PhaseExchanging, game.PhaseCalling, game.PhasePlaying, game.PhaseFinished:
+	default:
+		http.Error(w, "invalid status", http.StatusBadRequest)
+		return
+	}
+
+	games, err := h.svc.ListGamesByStatus(r.Context(), status)
+	if err != nil {
+		if errors.Is(err, service.ErrRedisStoreNotInitialized) {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Make sure we return an empty array instead of null if no games are found
+	if games == nil {
+		games = []*game.GameState{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(games)
 }
 
 func LoggingMiddleware(next http.Handler) http.Handler {

@@ -2,21 +2,34 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
-	redisstore "github.com/joekhosbayar/go-mighty/internal/store/redis"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 )
 
+var ErrRedisStoreNotInitialized = errors.New("redis store not initialized")
+
+type RedisStore interface {
+	SaveGame(ctx context.Context, g *game.GameState) error
+	LoadGame(ctx context.Context, gameID string) (*game.GameState, error)
+	AcquireLock(ctx context.Context, gameID string) (bool, error)
+	ReleaseLock(ctx context.Context, gameID string) error
+	CheckVersion(ctx context.Context, gameID string, clientVersion int64) error
+	PublishEvent(ctx context.Context, gameID string, event interface{}) error
+	Subscribe(ctx context.Context, gameID string) *redis.PubSub
+}
+
 type GameService struct {
-	redisStore    *redisstore.Store
+	redisStore    RedisStore
 	postgresStore *postgres.Store
 }
 
-func NewGameService(r *redisstore.Store, p *postgres.Store) *GameService {
+func NewGameService(r RedisStore, p *postgres.Store) *GameService {
 	return &GameService{
 		redisStore:    r,
 		postgresStore: p,
@@ -165,10 +178,45 @@ func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, 
 
 // Subscribe returns a redis PubSub
 func (s *GameService) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
+	if s.redisStore == nil {
+		return nil
+	}
 	return s.redisStore.Subscribe(ctx, gameID)
 }
 
 // GetGame retrieves game state
 func (s *GameService) GetGame(ctx context.Context, gameID string) (*game.GameState, error) {
+	if s.redisStore == nil {
+		return nil, ErrRedisStoreNotInitialized
+	}
 	return s.redisStore.LoadGame(ctx, gameID)
+}
+
+// ListGamesByStatus retrieves a list of games with the specified status
+func (s *GameService) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error) {
+	if s.redisStore == nil {
+		return nil, ErrRedisStoreNotInitialized
+	}
+
+	ids, err := s.postgresStore.ListGamesByStatus(ctx, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list games from db: %w", err)
+	}
+
+	var games []*game.GameState
+	for _, id := range ids {
+		g, err := s.redisStore.LoadGame(ctx, id)
+		if err != nil {
+			log.Warn().Str("game_id", id).Err(err).Msg("failed to load game from redis")
+			continue
+		}
+		if g != nil {
+			// Only include games where status actually matches (Redis is truth for hot state)
+			if g.Status == status {
+				games = append(games, g)
+			}
+		}
+	}
+
+	return games, nil
 }
