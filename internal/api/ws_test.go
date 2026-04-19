@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/joekhosbayar/go-mighty/internal/service"
+	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 )
 
 // TestWSHandler_RejectEarlyData confirms that the server rejects a WebSocket handshake
@@ -15,7 +16,8 @@ import (
 func TestWSHandler_RejectEarlyData(t *testing.T) {
 	// Setup minimal dependencies
 	svc := service.NewGameService(nil, nil)
-	handler := NewHandler(svc)
+	authSvc := service.NewAuthService(&postgres.Store{}, "testsecret")
+	handler := NewHandler(svc, authSvc)
 
 	server := httptest.NewServer(http.HandlerFunc(handler.WSHandler))
 	defer server.Close()

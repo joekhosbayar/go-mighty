@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
@@ -14,11 +15,97 @@ import (
 )
 
 type Handler struct {
-	svc *service.GameService
+	svc     *service.GameService
+	authSvc *service.AuthService
 }
 
-func NewHandler(svc *service.GameService) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *service.GameService, authSvc *service.AuthService) *Handler {
+	return &Handler{
+		svc:     svc,
+		authSvc: authSvc,
+	}
+}
+
+func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
+	if h.authSvc == nil {
+		return nil, errors.New("authentication service is not configured")
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return nil, errors.New("missing Authorization header")
+	}
+	parts := strings.Fields(authHeader)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return nil, errors.New("invalid Authorization header format")
+	}
+	return h.authSvc.ValidateToken(parts[1])
+}
+
+// SignupHandler - POST /auth/signup
+func (h *Handler) SignupHandler(w http.ResponseWriter, r *http.Request) {
+	type Request struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.authSvc.Signup(r.Context(), req.Username, req.Password, req.Email)
+	if err != nil {
+		if errors.Is(err, service.ErrUserAlreadyExists) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(struct {
+		ID        string    `json:"id"`
+		Username  string    `json:"username"`
+		Email     string    `json:"email"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}{
+		ID:        user.ID,
+		Username:  user.Username,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+	})
+}
+
+// LoginHandler - POST /auth/login
+func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	type Request struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	token, err := h.authSvc.Login(r.Context(), req.Username, req.Password)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
 // CreateGameHandler - POST /games
@@ -44,12 +131,16 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 
 // JoinGameHandler - POST /games/{id}/join
 func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
-	gameID := r.PathValue("id") // Go 1.22
+	claims, err := h.authenticate(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	gameID := r.PathValue("id")
 
 	type Request struct {
-		PlayerID string `json:"player_id"`
-		Name     string `json:"name"`
-		Seat     int    `json:"seat"`
+		Seat int `json:"seat"`
 	}
 	var req Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -57,7 +148,7 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	g, err := h.svc.JoinGame(r.Context(), gameID, req.PlayerID, req.Name, req.Seat)
+	g, err := h.svc.JoinGame(r.Context(), gameID, claims.UserID, claims.Username, req.Seat)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
