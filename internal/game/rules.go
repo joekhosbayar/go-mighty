@@ -452,7 +452,13 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 
 			if len(g.Tricks) == 10 {
 				g.Status = PhaseFinished
-				// TODO: Calculate final scores
+				declarerScore, partnerScore := g.CalculateFinalScore()
+				if g.Players[g.Declarer] != nil {
+					g.Scores[g.Players[g.Declarer].ID] = int(declarerScore)
+				}
+				if g.PartnerSeat >= 0 && g.PartnerSeat < len(g.Players) && g.Players[g.PartnerSeat] != nil {
+					g.Scores[g.Players[g.PartnerSeat].ID] = int(partnerScore)
+				}
 			} else {
 				g.Tricks = append(g.Tricks, Trick{Cards: []PlayedCard{}})
 			}
@@ -551,11 +557,11 @@ func (g *GameState) CalculateFinalScore() (float64, float64) {
 	}
 
 	// User's example says "7-spade bid... win 7 out of 10 tricks".
-	contractGoal := g.Contract.Points 
-	
+	contractGoal := g.Contract.Points
+
 	score := 0.0
 	diff := tricksWon - contractGoal
-	
+
 	if diff >= 0 {
 		// Won!
 		score = float64(contractGoal*10 + diff*5)

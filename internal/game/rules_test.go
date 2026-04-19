@@ -76,7 +76,7 @@ func TestBeats(t *testing.T) {
 	// Scenario: Trump is Hearts. So Spades Ace is Mighty.
 	g.Trump = Hearts
 	// Simulate middle trick
-	g.Tricks = append(g.Tricks, Trick{}, Trick{}) 
+	g.Tricks = append(g.Tricks, Trick{}, Trick{})
 	trick := Trick{LeadSuit: Clubs}
 
 	mighty := Card{Suit: Spades, Rank: Ace}
@@ -160,7 +160,7 @@ func TestJokerCaller(t *testing.T) {
 
 func TestMightyIdentity(t *testing.T) {
 	g := NewGame("test-mighty")
-	
+
 	// Hearts Trump: Spades Ace is Mighty
 	g.Trump = Hearts
 	if !g.IsMighty(Card{Suit: Spades, Rank: Ace}) {
@@ -177,8 +177,8 @@ func TestMightyIdentity(t *testing.T) {
 func TestFirstTrickTrumpLead(t *testing.T) {
 	g := NewGame("test-first-lead")
 	g.Players[0] = &Player{ID: "P1", Seat: 0, Hand: []Card{
-		{Suit: Hearts, Rank: Ace},   // Trump
-		{Suit: Clubs, Rank: Two},    // Non-trump
+		{Suit: Hearts, Rank: Ace}, // Trump
+		{Suit: Clubs, Rank: Two},  // Non-trump
 	}}
 	g.Status = PhasePlaying
 	g.Trump = Hearts
@@ -229,12 +229,47 @@ func TestJokerCallerForce(t *testing.T) {
 	}
 }
 
+func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
+	g := NewGame("test-first-trick-mighty")
+	g.Status = PhasePlaying
+	g.Trump = Hearts // Mighty is Ace of Spades
+	g.CurrentTurn = 1
+	g.Players[0] = &Player{ID: "P1", Seat: 0}
+	g.Players[1] = &Player{ID: "P2", Seat: 1}
+	g.Tricks = []Trick{{
+		Cards: []PlayedCard{
+			{PlayerID: "P1", Seat: 0, Card: Card{Suit: Hearts, Rank: King}},
+		},
+		LeadSuit: Hearts,
+	}}
+
+	// Has lead suit in hand, so off-suit Mighty is not allowed on trick 1.
+	g.Players[1].Hand = []Card{
+		{Suit: Spades, Rank: Ace}, // Mighty
+		{Suit: Hearts, Rank: Two}, // Can follow suit
+	}
+	err := g.ValidateMove("P2", MovePlayCard, PlayCardMove{Card: Card{Suit: Spades, Rank: Ace}})
+	if err == nil {
+		t.Fatalf("expected first-trick mighty rejection when player can follow suit")
+	}
+
+	// No lead suit available, so Mighty is allowed.
+	g.Players[1].Hand = []Card{
+		{Suit: Spades, Rank: Ace}, // Mighty
+		{Suit: Clubs, Rank: Two},
+	}
+	err = g.ValidateMove("P2", MovePlayCard, PlayCardMove{Card: Card{Suit: Spades, Rank: Ace}})
+	if err != nil {
+		t.Fatalf("expected mighty to be allowed when player cannot follow suit: %v", err)
+	}
+}
+
 func TestScoring(t *testing.T) {
 	g := NewGame("test-scoring")
 	g.Declarer = 0
 	g.PartnerSeat = 1
 	g.Contract = &Bid{Points: 7, Suit: Spades, IsNoTrump: false}
-	
+
 	// Simulate 8 tricks won by team (Declarer + Partner)
 	for i := 0; i < 8; i++ {
 		g.Tricks = append(g.Tricks, Trick{Winner: 0})
