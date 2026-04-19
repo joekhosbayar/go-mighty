@@ -52,6 +52,9 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	// I will add `Subscribe(ctx, gameID)` to `GameService`.
 
 	pubsub := h.svc.Subscribe(r.Context(), gameID)
+	if pubsub == nil {
+		return
+	}
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()

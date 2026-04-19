@@ -57,6 +57,28 @@ paths:
           description: Internal server error
 
   /games:
+    get:
+      summary: List games
+      operationId: listGames
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            default: waiting
+          description: Filter games by status (e.g., waiting)
+      responses:
+        '200':
+          description: A list of games
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Game'
+        '500':
+          description: Internal server error
     post:
       summary: Create a new game
       operationId: createGame

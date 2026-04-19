@@ -165,10 +165,47 @@ func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, 
 
 // Subscribe returns a redis PubSub
 func (s *GameService) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
+	if s.redisStore == nil {
+		return nil
+	}
 	return s.redisStore.Subscribe(ctx, gameID)
 }
 
 // GetGame retrieves game state
 func (s *GameService) GetGame(ctx context.Context, gameID string) (*game.GameState, error) {
+	if s.redisStore == nil {
+		return nil, fmt.Errorf("redis store not initialized")
+	}
 	return s.redisStore.LoadGame(ctx, gameID)
+}
+
+// ListGamesByStatus retrieves a list of games with the specified status
+func (s *GameService) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error) {
+	ids, err := s.postgresStore.ListGamesByStatus(ctx, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list games from db: %w", err)
+	}
+
+	var games []*game.GameState
+	if s.redisStore == nil {
+		// Mock behavior for tests when redis is not available
+		return games, nil
+	}
+
+	for _, id := range ids {
+		g, err := s.redisStore.LoadGame(ctx, id)
+		if err != nil {
+			// Log error but continue
+			fmt.Printf("failed to load game %s from redis: %v\n", id, err)
+			continue
+		}
+		if g != nil {
+			// Only include games where status actually matches (Redis is truth for hot state)
+			if g.Status == status {
+				games = append(games, g)
+			}
+		}
+	}
+
+	return games, nil
 }

@@ -66,6 +66,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /auth/signup", handler.SignupHandler)
 	mux.HandleFunc("POST /auth/login", handler.LoginHandler)
+        mux.HandleFunc("GET /games", handler.ListGamesHandler)
 	mux.HandleFunc("POST /games", handler.CreateGameHandler)
 	mux.HandleFunc("POST /games/{id}/join", handler.JoinGameHandler)
 	mux.HandleFunc("POST /games/{id}/move", handler.MoveHandler)

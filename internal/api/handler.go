@@ -241,6 +241,29 @@ func (h *Handler) GetGameHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(g)
 }
 
+// ListGamesHandler - GET /games
+func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
+	// Query param 'status' (e.g. ?status=waiting)
+	statusParam := r.URL.Query().Get("status")
+	if statusParam == "" {
+		statusParam = string(game.PhaseWaiting)
+	}
+
+	games, err := h.svc.ListGamesByStatus(r.Context(), game.Phase(statusParam))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Make sure we return an empty array instead of null if no games are found
+	if games == nil {
+		games = []*game.GameState{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(games)
+}
+
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Info().
