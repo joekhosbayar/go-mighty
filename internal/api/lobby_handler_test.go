@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,11 +20,14 @@ import (
 )
 
 type fakeRedisStore struct {
+	mu    sync.RWMutex
 	games map[string]*game.GameState
 }
 
 func (f *fakeRedisStore) SaveGame(ctx context.Context, g *game.GameState) error { return nil }
 func (f *fakeRedisStore) LoadGame(ctx context.Context, gameID string) (*game.GameState, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if g, ok := f.games[gameID]; ok {
 		return g, nil
 	}
