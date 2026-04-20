@@ -23,7 +23,10 @@ Feature: Full Mighty Game Marathon
     And "Dave" passes
     And "Eve" passes
     And "Alice" bids 16 "spades"
+    And "Bob" passes
     And "Carol" passes
+    And "Dave" passes
+    And "Eve" passes
     Then "Alice" should be the declarer with a bid of 16 "spades"
     And the game "marathon-999" status should be "exchanging"
     
