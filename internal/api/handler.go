@@ -151,7 +151,7 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 	actualID := uuid.NewString()
 
 	// Create the game
-	_, err = h.svc.CreateGame(r.Context(), actualID)
+	g, err := h.svc.CreateGame(r.Context(), actualID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -160,7 +160,7 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 	// Auto-join the creator at seat 0
 	updatedState, err := h.svc.JoinGame(r.Context(), actualID, claims.UserID, claims.Username, 0)
 	if err != nil {
-		log.Error().Str("game_id", actualID).Str("user_id", claims.UserID).Err(err).Msg("Failed to auto-join creator")
+		log.Error().Str("game_id", g.ID).Str("user_id", claims.UserID).Err(err).Msg("Failed to auto-join creator")
 		http.Error(w, "failed to auto-join creator", http.StatusInternalServerError)
 		return
 	}
