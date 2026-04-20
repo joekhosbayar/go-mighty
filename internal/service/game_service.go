@@ -77,7 +77,16 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 	}
 	if g.Players[seat] != nil {
 		if g.Players[seat].ID == playerID {
-			return g, nil // Already in seat
+			g.Players[seat].Name = playerName
+			g.Players[seat].IsConnected = true
+			g.Version++
+			g.UpdatedAt = time.Now()
+
+			if err := s.redisStore.SaveGame(ctx, g); err != nil {
+				return nil, err
+			}
+
+			return g, nil // Already in seat; refresh connection state
 		}
 		return nil, fmt.Errorf("seat occupied")
 	}

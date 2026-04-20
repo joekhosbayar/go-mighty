@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -79,15 +80,18 @@ func (a *apiFeature) iAmLoggedInAs(username string) error {
 }
 
 func (a *apiFeature) iCreateANewGameWithID(id string) error {
-	token := a.tokens["Alice"]
-	if token == "" {
-		for _, t := range a.tokens { token = t; break }
-	}
+	username := ""
+	usernames := make([]string, 0, len(a.tokens))
+	for u := range a.tokens { usernames = append(usernames, u) }
+	sort.Strings(usernames)
+	if len(usernames) > 0 { username = usernames[0] }
 	// Fallback if no players yet (e.g. Lobby test)
-	if token == "" {
-		a.iAmLoggedInAs("creator")
-		token = a.tokens["creator"]
+	if username == "" {
+		if err := a.iAmLoggedInAs("creator"); err != nil { return err }
+		username = "creator"
 	}
+	token := a.tokens[username]
+	if token == "" { return fmt.Errorf("cannot create game for %q: user is not logged in or token is missing", username) }
 	resp, err := a.client.R().
 		SetHeader("Authorization", "Bearer "+token).
 		Post("/games")
@@ -103,7 +107,8 @@ func (a *apiFeature) iCreateANewGameWithID(id string) error {
 }
 
 func (a *apiFeature) createsAGame(username, gameID string) error {
-	token := a.tokens[username]
+	token, ok := a.tokens[username]
+	if !ok || token == "" { return fmt.Errorf("cannot create game for %q: user is not logged in or token is missing", username) }
 	resp, err := a.client.R().
 		SetHeader("Authorization", "Bearer "+token).
 		Post("/games")
@@ -218,7 +223,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the response should contain a valid JWT token$`, func() error { return nil })
 	ctx.Step(`^I am logged in as "([^"]*)"$`, api.iAmLoggedInAs)
 	ctx.Step(`^I create a new game with ID "([^"]*)"$`, api.iCreateANewGameWithID)
-	ctx.Step(`^"([^"]*)" creates a .*game "([^"]*)"$`, func(u, g string) error { return api.iCreateANewGameWithID(g) })
+	ctx.Step(`^"([^"]*)" creates a .*game "([^"]*)"$`, func(u, g string) error { return api.createsAGame(u, g) })
 	ctx.Step(`^the game "([^"]*)" should exist$`, func(id string) error { return api.refreshState() })
 	ctx.Step(`^there are (\d+) games waiting for players$`, func(c int) error {
 		for i := 0; i < c; i++ { api.iCreateANewGameWithID(fmt.Sprintf("wait-%d", i)) }; return nil
@@ -231,8 +236,6 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^(\d+) authenticated players: "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)"$`, func(c int, p1, p2, p3, p4, p5 string) error {
 		for _, n := range []string{p1, p2, p3, p4, p5} { if err := api.iAmLoggedInAs(n); err != nil { return err } }; return nil
 	})
-	ctx.Step(`^"([^"]*)" joins seat (\d+) of game "([^"]*)"$`, func(u string, s int, g string) error { return api.joinsSeatOfGame(u, s) })
-
 	ctx.Step(`^"([^"]*)" joins seat (\d+) of game "([^"]*)"$`, func(u string, s int, g string) error { return api.joinsSeatOfGame(u, s) })
 
 	ctx.Step(`^"([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)" join the game "([^"]*)"$`, func(p1, p2, p3, p4, p5, g string) error {
