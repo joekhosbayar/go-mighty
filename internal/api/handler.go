@@ -247,11 +247,17 @@ func ConvertPayload(moveType game.MoveType, payload interface{}) (interface{}, e
 		}
 		return card, nil
 	case game.MovePlayCard:
-		var card game.Card
-		if err := json.Unmarshal(data, &card); err != nil {
-			return nil, err
+		// Attempt to unmarshal as PlayCardMove first
+		var playMove game.PlayCardMove
+		if err := json.Unmarshal(data, &playMove); err == nil && playMove.Card.Rank != "" {
+			return playMove, nil
 		}
-		return card, nil
+		// Fallback for raw Card payload
+		var card game.Card
+		if err := json.Unmarshal(data, &card); err == nil && card.Rank != "" {
+			return game.PlayCardMove{Card: card}, nil
+		}
+		return nil, fmt.Errorf("invalid play card payload: expected card or play_card_move object")
 	case game.MovePass:
 		return nil, nil // No payload needed for pass usually, or ignored
 	default:
