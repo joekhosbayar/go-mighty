@@ -21,11 +21,7 @@ Feature: Mighty Gameplay
     Then "Alice" should be the declarer
     And the game "mighty-match-999" status should be "exchanging"
     
-    When "Alice" discards 3 cards:
-      | suit   | rank |
-      | hearts | 2    |
-      | hearts | 3    |
-      | hearts | 4    |
+    When "Alice" discards 3 least powerful cards
     Then the game "mighty-match-999" status should be "calling"
     
     When "Alice" calls the "Ace of Hearts" as the friend

@@ -3,6 +3,8 @@ package game
 import (
 	"fmt"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ErrInvalidMove is returned when a move is invalid
@@ -189,6 +191,7 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 
 	card := move.Card
 	if !p.HasCard(card) {
+		log.Error().Str("player", p.Name).Interface("target_card", card).Interface("hand", p.Hand).Msg("Player does not hold card")
 		return fmt.Errorf("%w: do not hold card %s", ErrInvalidMove, card)
 	}
 
@@ -238,6 +241,13 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 	if card.Suit != lead {
 		// Allowed if playing Mighty or Joker
 		if g.IsMighty(card) || card.Rank == Joker {
+			// Special Rule: First Hand Mighty Restriction
+			if len(g.Tricks) == 1 && g.IsMighty(card) {
+				// "cannot play mighty on your first hand, unless that is the only card you have that matches the lead suit"
+				if p.HasSuit(lead) {
+					return fmt.Errorf("%w: cannot play mighty on first trick if you can follow suit", ErrInvalidMove)
+				}
+			}
 			return nil
 		}
 
@@ -319,6 +329,7 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 		} else {
 			g.CurrentBid = &bid
 			g.Declarer = p.Seat // Potential declarer
+			g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
 		}
 		// In rotation, move turn to next player?
 		// Or if everyone passes?
@@ -445,7 +456,21 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 
 			if len(g.Tricks) == 10 {
 				g.Status = PhaseFinished
-				// TODO: Calculate final scores
+				declarerScore, partnerScore := g.CalculateFinalScore()
+				g.Scores = make(map[string]int, len(g.Players))
+				for _, player := range g.Players {
+					if player != nil {
+						g.Scores[player.ID] = 0
+					}
+				}
+				// This score model stores the declarer/friend team result for the round.
+				// Opponents are explicitly kept at 0 in this per-round map.
+				if g.Declarer >= 0 && g.Declarer < len(g.Players) && g.Players[g.Declarer] != nil {
+					g.Scores[g.Players[g.Declarer].ID] = int(declarerScore)
+				}
+				if g.PartnerSeat >= 0 && g.PartnerSeat < len(g.Players) && g.Players[g.PartnerSeat] != nil {
+					g.Scores[g.Players[g.PartnerSeat].ID] = int(partnerScore)
+				}
 			} else {
 				g.Tricks = append(g.Tricks, Trick{Cards: []PlayedCard{}})
 			}
@@ -544,11 +569,11 @@ func (g *GameState) CalculateFinalScore() (float64, float64) {
 	}
 
 	// User's example says "7-spade bid... win 7 out of 10 tricks".
-	contractGoal := g.Contract.Points 
-	
+	contractGoal := g.Contract.Points
+
 	score := 0.0
 	diff := tricksWon - contractGoal
-	
+
 	if diff >= 0 {
 		// Won!
 		score = float64(contractGoal*10 + diff*5)
