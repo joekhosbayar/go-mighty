@@ -82,26 +82,17 @@ paths:
     post:
       summary: Create a new game
       operationId: createGame
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id:
-                  type: string
-                  description: Optional custom ID for the game. If empty, one will be generated.
-                  example: "game-123"
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: Game created successfully
+          description: Game created and creator joined at seat 0
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Game'
-        '400':
-          description: Invalid request
+        '401':
+          description: Unauthorized
         '500':
           description: Internal server error
 

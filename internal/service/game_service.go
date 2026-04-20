@@ -76,6 +76,9 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 		return nil, fmt.Errorf("invalid seat")
 	}
 	if g.Players[seat] != nil {
+		if g.Players[seat].ID == playerID {
+			return g, nil // Already in seat
+		}
 		return nil, fmt.Errorf("seat occupied")
 	}
 	g.Players[seat] = &game.Player{ID: playerID, Name: playerName, Seat: seat, IsConnected: true, Hand: []game.Card{}, Points: []game.Card{}}

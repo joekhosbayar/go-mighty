@@ -141,23 +141,36 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 // CreateGameHandler - POST /games
 func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
-	type Request struct {
-		ID string `json:"id"`
-	}
-	var req Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	claims, err := h.authenticate(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	g, err := h.svc.CreateGame(r.Context(), req.ID)
+	// Generate a short authoritative game ID (last 8 digits of nanoseconds)
+	shortID := strings.Split(fmt.Sprintf("%d", time.Now().UnixNano()), "")
+	gameID := shortID[len(shortID)-8:]
+	actualID := strings.Join(gameID, "")
+
+	// Create the game
+	g, err := h.svc.CreateGame(r.Context(), actualID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Auto-join the creator at seat 0
+	updatedState, err := h.svc.JoinGame(r.Context(), actualID, claims.UserID, claims.Username, 0)
+	if err != nil {
+		// Log error but the game is still created
+		log.Error().Str("game_id", actualID).Str("user_id", claims.UserID).Err(err).Msg("Failed to auto-join creator")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(g)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(g)
+	json.NewEncoder(w).Encode(updatedState)
 }
 
 // JoinGameHandler - POST /games/{id}/join

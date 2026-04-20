@@ -3,8 +3,6 @@ package game
 import (
 	"fmt"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 // ErrInvalidMove is returned when a move is invalid
@@ -191,7 +189,6 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 
 	card := move.Card
 	if !p.HasCard(card) {
-		log.Error().Str("player", p.Name).Interface("target_card", card).Interface("hand", p.Hand).Msg("Player does not hold card")
 		return fmt.Errorf("%w: do not hold card %s", ErrInvalidMove, card)
 	}
 
