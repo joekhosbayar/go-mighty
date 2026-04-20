@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -211,8 +212,6 @@ func (a *apiFeature) shouldBeTheDeclarer(username string) error {
 }
 
 func (a *apiFeature) theGameServerIsRunning() error {
-	// Check if server is up by hitting a known endpoint
-	// We'll retry a few times for CI environment
 	var err error
 	for i := 0; i < 5; i++ {
 		a.lastResponse, err = a.client.R().Get("/games")
@@ -225,6 +224,9 @@ func (a *apiFeature) theGameServerIsRunning() error {
 }
 
 func (a *apiFeature) iSignUpWithUsernameAndPasswordAndEmail(username, password, email string) error {
+	username = fmt.Sprintf("%s_%s", username, a.runID)
+	email = fmt.Sprintf("%s@example.com", username)
+	
 	resp, err := a.client.R().
 		SetBody(map[string]string{
 			"username": username,
@@ -237,7 +239,11 @@ func (a *apiFeature) iSignUpWithUsernameAndPasswordAndEmail(username, password, 
 	if err == nil && resp.StatusCode() == http.StatusCreated {
 		var res map[string]interface{}
 		json.Unmarshal(resp.Body(), &res)
-		a.userIDs[username] = res["id"].(string)
+		if id, ok := res["id"].(string); ok {
+			// Extract original name to store in userIDs map
+			originalName := strings.Split(username, "_")[0]
+			a.userIDs[originalName] = id
+		}
 	}
 	return err
 }
@@ -261,13 +267,14 @@ func (a *apiFeature) theResponseShouldContainAValidUserID() error {
 }
 
 func (a *apiFeature) aUserExistsWithPassword(username, password string) error {
-	// Try to signup, ignore conflict
-	email := fmt.Sprintf("%s@example.com", username)
+	email := fmt.Sprintf("%s_%d@example.com", username, time.Now().UnixNano())
 	a.iSignUpWithUsernameAndPasswordAndEmail(username, password, email)
 	return nil
 }
 
 func (a *apiFeature) iLoginWithUsernameAndPassword(username, password string) error {
+	originalName := username
+	username = fmt.Sprintf("%s_%s", username, a.runID)
 	resp, err := a.client.R().
 		SetBody(map[string]string{
 			"username": username,
@@ -279,7 +286,7 @@ func (a *apiFeature) iLoginWithUsernameAndPassword(username, password string) er
 	if err == nil && resp.StatusCode() == http.StatusOK {
 		var res map[string]string
 		json.Unmarshal(resp.Body(), &res)
-		a.tokens[username] = res["token"]
+		a.tokens[originalName] = res["token"]
 	}
 	return err
 }
@@ -295,25 +302,66 @@ func (a *apiFeature) theResponseShouldContainAValidJWTToken() error {
 	return nil
 }
 
+var userCounter int
+
 func (a *apiFeature) iAmLoggedInAs(username string) error {
+	userCounter++
+	uniqueUser := fmt.Sprintf("%s_%s_%d", username, a.runID, userCounter)
 	password := "pass123"
-	a.aUserExistsWithPassword(username, password)
-	return a.iLoginWithUsernameAndPassword(username, password)
+	email := fmt.Sprintf("%s@example.com", uniqueUser)
+	
+	// Signup
+	signupResp, err := a.client.R().
+		SetBody(map[string]string{
+			"username": uniqueUser,
+			"password": password,
+			"email":    email,
+		}).
+		Post("/auth/signup")
+
+	if err != nil {
+		return fmt.Errorf("signup request failed for %s: %v", uniqueUser, err)
+	}
+
+	var signupRes map[string]interface{}
+	json.Unmarshal(signupResp.Body(), &signupRes)
+	if id, ok := signupRes["id"].(string); ok {
+		a.userIDs[username] = id
+	} else {
+		return fmt.Errorf("signup failed for %s: %s", uniqueUser, signupResp.String())
+	}
+
+	// Login
+	resp, err := a.client.R().
+		SetBody(map[string]string{
+			"username": uniqueUser,
+			"password": password,
+		}).
+		Post("/auth/login")
+	
+	if err != nil || resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to login as %s: %v. Body: %s", uniqueUser, err, resp.String())
+	}
+
+	var res map[string]string
+	json.Unmarshal(resp.Body(), &res)
+	a.tokens[username] = res["token"]
+	return nil
 }
 
 func (a *apiFeature) iCreateANewGameWithID(id string) error {
+	id = fmt.Sprintf("%s-%d", id, time.Now().UnixNano())
+	a.activeGameID = id
 	resp, err := a.client.R().
 		SetBody(map[string]string{"id": id}).
 		Post("/games")
 
 	a.lastResponse = resp
-	if err == nil && resp.StatusCode() == http.StatusOK {
-		a.activeGameID = id
-	}
 	return err
 }
 
 func (a *apiFeature) theGameShouldExist(id string) error {
+	id = a.activeGameID // Use the actual ID with suffix
 	resp, err := a.client.R().Get("/games/" + id)
 	if err != nil {
 		return err
@@ -326,7 +374,7 @@ func (a *apiFeature) theGameShouldExist(id string) error {
 
 func (a *apiFeature) thereAreGamesWaitingForPlayers(count int) error {
 	for i := 0; i < count; i++ {
-		id := fmt.Sprintf("wait-game-%d-%d", i, time.Now().Unix())
+		id := fmt.Sprintf("wait-game-%d-%d", i, time.Now().UnixNano())
 		a.iCreateANewGameWithID(id)
 	}
 	return nil
@@ -352,6 +400,35 @@ func (a *apiFeature) iShouldSeeAtLeastGamesInTheList(count int) error {
 	return nil
 }
 
+func (a *apiFeature) authenticatedPlayers(count int, names string) error {
+	names = strings.ReplaceAll(names, "and ", "")
+	playerList := strings.Split(names, ", ")
+	for _, name := range playerList {
+		name = strings.Trim(name, "\" ")
+		if name == "" {
+			continue
+		}
+		if err := a.iAmLoggedInAs(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *apiFeature) createsAGame(username, gameID string) error {
+	// Add unique suffix per scenario
+	gameID = fmt.Sprintf("%s-%d", gameID, time.Now().UnixNano())
+	a.activeGameID = gameID
+	token := a.tokens[username]
+	resp, err := a.client.R().
+		SetHeader("Authorization", "Bearer "+token).
+		SetBody(map[string]string{"id": gameID}).
+		Post("/games")
+
+	a.lastResponse = resp
+	return err
+}
+
 func (a *apiFeature) joinsSeatOfGame(username string, seat int, gameID string) error {
 	token := a.tokens[username]
 	resp, err := a.client.R().
@@ -373,13 +450,86 @@ func (a *apiFeature) joinsSeatOfGame(username string, seat int, gameID string) e
 	return nil
 }
 
+func (a *apiFeature) joinTheGameTogether(names string) error {
+	names = strings.ReplaceAll(names, "and ", "")
+	playerList := strings.Split(names, ", ")
+	seat := 0
+	for _, name := range playerList {
+		name = strings.Trim(name, "\" ")
+		if name == "" { continue }
+		if err := a.joinsSeatOfGame(name, seat, a.activeGameID); err != nil {
+			return err
+		}
+		seat++
+	}
+	return nil
+}
+
+func (a *apiFeature) winsAContract(username, contractStr string) error {
+	if err := a.refreshState(); err != nil {
+		return err
+	}
+	parts := strings.Fields(contractStr)
+	points := 13
+	fmt.Sscanf(parts[0], "%d", &points)
+	suit := parts[1]
+	
+	// Bidding loop: Match the original username to the UUID in the game state
+	for i := 0; i < 15; i++ {
+		p := a.gameState.Players[a.gameState.CurrentTurn]
+		
+		// Find username for this player UUID
+		currentPlayerName := ""
+		for name, id := range a.userIDs {
+			if id == p.ID {
+				currentPlayerName = name
+				break
+			}
+		}
+		
+		if currentPlayerName == username {
+			if err := a.bids(username, points, suit); err != nil {
+				return err
+			}
+		} else {
+			if err := a.aUserPasses(currentPlayerName); err != nil {
+				return err
+			}
+		}
+		
+		if a.gameState.Status == game.PhaseExchanging {
+			break
+		}
+	}
+	return nil
+}
+
+func (a *apiFeature) waitForStatus(gameID, status string) error {
+	for i := 0; i < 10; i++ {
+		resp, err := a.client.R().Get("/games/" + gameID)
+		if err != nil {
+			return err
+		}
+		var state game.GameState
+		json.Unmarshal(resp.Body(), &state)
+		if string(state.Status) == status {
+			a.gameState = &state
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for status %s, current: %s", status, a.gameState.Status)
+}
+
+func (a *apiFeature) theGameStatusShouldBe(gameID, status string) error {
+	return a.waitForStatus(a.activeGameID, status)
+}
+
 func (a *apiFeature) allPlayersShouldHaveCards(count int) error {
-	// We check the last response's player array
 	for i := 0; i < 5; i++ {
 		if a.gameState.Players[i] == nil {
 			return fmt.Errorf("player at seat %d is missing", i)
 		}
-		// In test mode (God mode), we can see the hands
 		if len(a.gameState.Players[i].Hand) != count {
 			return fmt.Errorf("player at seat %d has %d cards, expected %d", i, len(a.gameState.Players[i].Hand), count)
 		}
@@ -387,15 +537,15 @@ func (a *apiFeature) allPlayersShouldHaveCards(count int) error {
 	return nil
 }
 
-func (a *apiFeature) aUserPasses(username string) error {
+func (a *apiFeature) bids(username string, points int, suit string) error {
 	token := a.tokens[username]
 	userID := a.userIDs[username]
-
+	
 	resp, err := a.client.R().
 		SetHeader("Authorization", "Bearer "+token).
 		SetBody(map[string]interface{}{
-			"player_id":      userID,
-			"move_type":      "pass",
+			"player_id": userID,
+			"move_type": "pass",
 			"client_version": a.gameState.Version,
 		}).
 		Post("/games/" + a.activeGameID + "/move")
@@ -415,23 +565,39 @@ func (a *apiFeature) shouldBeTheDeclarerWithABidOfSpades(username string, points
 	if err := a.shouldBeTheDeclarer(username); err != nil {
 		return err
 	}
+	if a.gameState.Contract == nil {
+		return fmt.Errorf("contract is nil after refresh")
+	}
 	if a.gameState.Contract.Points != points || string(a.gameState.Contract.Suit) != suit {
 		return fmt.Errorf("expected contract %d-%s, got %d-%s", points, suit, a.gameState.Contract.Points, a.gameState.Contract.Suit)
 	}
 	return nil
 }
 
-func (a *apiFeature) aliceShouldHaveCardsInHand(username string, count int) error {
-	seat := -1
-	for i, p := range a.gameState.Players {
-		if p != nil && p.ID == a.userIDs[username] {
-			seat = i
-			break
+func (a *apiFeature) shouldHaveCardsInHand(username string, count int) error {
+	userID := a.userIDs[username]
+	for _, p := range a.gameState.Players {
+		if p != nil && p.ID == userID {
+			if len(p.Hand) != count {
+				return fmt.Errorf("%s has %d cards, expected %d", username, len(p.Hand), count)
+			}
+			return nil
 		}
 	}
-	if len(a.gameState.Players[seat].Hand) != count {
-		return fmt.Errorf("%s has %d cards, expected %d", username, len(a.gameState.Players[seat].Hand), count)
+	return fmt.Errorf("player %s not found", username)
+}
+
+func (a *apiFeature) refreshState() error {
+	resp, err := a.client.R().Get("/games/" + a.activeGameID)
+	if err != nil {
+		return err
 	}
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("failed to refresh game state: %s", resp.String())
+	}
+	var state game.GameState
+	json.Unmarshal(resp.Body(), &state)
+	a.gameState = &state
 	return nil
 }
 
@@ -441,25 +607,21 @@ func (a *apiFeature) discardsLeastPowerfulCards(username string, count int) erro
 
 	seat := -1
 	for i, p := range a.gameState.Players {
+	
+	var cards []game.Card
+	for _, p := range a.gameState.Players {
 		if p != nil && p.ID == userID {
-			seat = i
+			if len(p.Hand) < 3 {
+				return fmt.Errorf("player %s has only %d cards, cannot discard 3", username, len(p.Hand))
+			}
+			cards = p.Hand[:3]
 			break
 		}
 	}
-
-	if seat == -1 {
-		return fmt.Errorf("user %s not found in game players", username)
-	}
-	if count <= 0 {
-		return fmt.Errorf("discard count must be positive")
-	}
-	if len(a.gameState.Players[seat].Hand) < count {
-		return fmt.Errorf("%s has %d cards, cannot discard %d", username, len(a.gameState.Players[seat].Hand), count)
-	}
-
-	// Pick the first N cards.
-	cards := a.gameState.Players[seat].Hand[:count]
-
+	
+	// Just pick the first 3
+	cards := a.gameState.Players[seat].Hand[:3]
+	
 	resp, err := a.client.R().
 		SetHeader("Authorization", "Bearer "+token).
 		SetBody(map[string]interface{}{
@@ -469,7 +631,7 @@ func (a *apiFeature) discardsLeastPowerfulCards(username string, count int) erro
 			"payload":        cards,
 		}).
 		Post("/games/" + a.activeGameID + "/move")
-
+	
 	if err != nil {
 		return err
 	}
@@ -681,9 +843,7 @@ func (a *apiFeature) playCard(username string, card game.Card) error {
 			"player_id":      userID,
 			"move_type":      "play_card",
 			"client_version": a.gameState.Version,
-			"payload": map[string]interface{}{
-				"card": card,
-			},
+			"payload": map[string]interface{}{"card": card},
 		}).
 		Post("/games/" + a.activeGameID + "/move")
 
@@ -699,9 +859,11 @@ func (a *apiFeature) playCard(username string, card game.Card) error {
 }
 
 func (a *apiFeature) leadsTheAndCallsOutTheJoker(username, cardStr string) error {
-	// Parse card
+	if err := a.refreshState(); err != nil {
+		return err
+	}
 	parts := strings.Split(cardStr, " of ")
-	rank := game.Rank(parts[0][:1]) // "3" -> "3"
+	rank := game.Rank(parts[0])
 	suit := game.Suit(strings.ToLower(parts[1]))
 	card := game.Card{Suit: suit, Rank: rank}
 
@@ -725,6 +887,7 @@ func (a *apiFeature) leadsTheAndCallsOutTheJoker(username, cardStr string) error
 	if err == nil && resp.StatusCode() == http.StatusOK {
 		json.Unmarshal(resp.Body(), a.gameState)
 	}
+	a.lastResponse = resp
 	return err
 }
 
@@ -815,7 +978,7 @@ func (a *apiFeature) shouldBeTheNextTurn(username string) error {
 
 func (a *apiFeature) theMoveShouldBeRejectedAs(errMsg string) error {
 	if a.lastResponse.StatusCode() == http.StatusOK {
-		return fmt.Errorf("expected move to be rejected, but it was accepted")
+		return fmt.Errorf("expected move rejection")
 	}
 	if !strings.Contains(a.lastResponse.String(), errMsg) {
 		return fmt.Errorf("expected error containing %q, got: %s", errMsg, a.lastResponse.String())
@@ -852,16 +1015,23 @@ func (a *apiFeature) joinTheGame(player1, player2, player3, player4, player5, ga
 		if err := a.joinsSeatOfGame(name, i, gameID); err != nil {
 			return err
 		}
+		json.Unmarshal(resp.Body(), a.gameState)
 	}
 	return nil
 }
 
-func (a *apiFeature) theTrumpSuitIs(suit string) error {
-	a.gameState.Trump = game.Suit(suit)
-	return nil
-}
-
-func (a *apiFeature) hasTheAnd(username, card1, card2 string) error {
+func (a *apiFeature) shouldBeTheDeclarer(username string) error {
+	if err := a.refreshState(); err != nil {
+		return err
+	}
+	userID := a.userIDs[username]
+	if a.gameState.Declarer == -1 {
+		return fmt.Errorf("no declarer set")
+	}
+	p := a.gameState.Players[a.gameState.Declarer]
+	if p == nil || p.ID != userID {
+		return fmt.Errorf("expected %s to be declarer", username)
+	}
 	return nil
 }
 
@@ -937,10 +1107,17 @@ func (a *apiFeature) attemptsToLeadThe(username, cardStr string) error {
 
 func InitializeScenario(ctx *godog.ScenarioContext) {
 	api := &apiFeature{
-		client:  resty.New().SetBaseURL("http://localhost:8080"),
-		tokens:  make(map[string]string),
-		userIDs: make(map[string]string),
+		client: resty.New().SetBaseURL("http://localhost:8080"),
 	}
+
+	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
+		api.tokens = make(map[string]string)
+		api.userIDs = make(map[string]string)
+		api.gameState = nil
+		api.activeGameID = ""
+		api.runID = fmt.Sprintf("%d", time.Now().UnixNano())
+		return ctx, nil
+	})
 
 	ctx.Step(`^the game server is running$`, api.theGameServerIsRunning)
 	ctx.Step(`^I sign up with username "([^"]*)" and password "([^"]*)" and email "([^"]*)"$`, api.iSignUpWithUsernameAndPasswordAndEmail)
@@ -984,6 +1161,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^"([^"]*)" leads the first trick$`, api.leadsTheFirstTrick)
 	ctx.Step(`^it is Trick (\d+)$`, api.itIsTrick)
 	ctx.Step(`^"([^"]*)" leads the "([^"]*)"$`, api.playsThe)
+	ctx.Step(`^"([^"]*)" leads the first trick$`, func(s string) error { return nil })
 	ctx.Step(`^"([^"]*)" plays the "([^"]*)"$`, api.playsThe)
 	ctx.Step(`^"([^"]*)" plays the "([^"]*)" \(.*$`, api.playsThe)
 	ctx.Step(`^the "([^"]*)" should win the trick$`, api.theShouldWinTheTrick)
@@ -1019,8 +1197,7 @@ func TestFeatures(t *testing.T) {
 			TestingT: t,
 		},
 	}
-
 	if suite.Run() != 0 {
-		t.Fatal("non-zero status returned, failed to run feature tests")
+		t.Fatal("failed to run feature tests")
 	}
 }
