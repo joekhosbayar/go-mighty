@@ -32,7 +32,7 @@ func (f *fakeWSGameService) CreateGame(ctx context.Context, id string) (*game.Ga
 	return nil, nil
 }
 
-func (f *fakeWSGameService) JoinGame(ctx context.Context, gameID, playerID, playerName string, seat int) (*game.GameState, error) {
+func (f *fakeWSGameService) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.GameState, error) {
 	return nil, nil
 }
 

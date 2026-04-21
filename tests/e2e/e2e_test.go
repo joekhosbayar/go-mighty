@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"testing"
 	"time"
 
@@ -149,11 +148,10 @@ func (a *apiFeature) move(username string, moveType game.MoveType, payload inter
 	return nil
 }
 
-func (a *apiFeature) joinsSeatOfGame(username string, seat int) error {
+func (a *apiFeature) joinsSeatOfGame(username string) error {
 	token := a.tokens[username]
 	resp, err := a.client.R().
 		SetHeader("Authorization", "Bearer "+token).
-		SetBody(map[string]interface{}{"seat": seat}).
 		Post("/games/" + a.activeGameID + "/join")
 	if err != nil { return err }
 	if resp.StatusCode() != http.StatusOK { return fmt.Errorf("join failed: %s", resp.String()) }
@@ -247,15 +245,14 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^(\d+) authenticated players: "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)"$`, func(c int, p1, p2, p3, p4, p5 string) error {
 		for _, n := range []string{p1, p2, p3, p4, p5} { if err := api.iAmLoggedInAs(n); err != nil { return err } }; return nil
 	})
-	ctx.Step(`^"([^"]*)" joins seat (\d+) of game "([^"]*)"$`, func(u string, s int, g string) error { return api.joinsSeatOfGame(u, s) })
+	ctx.Step(`^"([^"]*)" joins seat (\d+) of game "([^"]*)"$`, func(u string, _ int, g string) error { return api.joinsSeatOfGame(u) })
 
 	ctx.Step(`^"([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)" join the game "([^"]*)"$`, func(p1, p2, p3, p4, p5, g string) error {
-		for i, n := range []string{p1, p2, p3, p4, p5} { if err := api.joinsSeatOfGame(n, i); err != nil { return err } }; return nil
+		for _, n := range []string{p1, p2, p3, p4, p5} { if err := api.joinsSeatOfGame(n); err != nil { return err } }; return nil
 	})
 	ctx.Step(`^all (\d+) players join the game "([^"]*)" in order:$`, func(c int, g string, t *godog.Table) error {
 		for _, r := range t.Rows[1:] {
-			s, _ := strconv.Atoi(r.Cells[1].Value)
-			if err := api.joinsSeatOfGame(r.Cells[0].Value, s); err != nil { return err }
+			if err := api.joinsSeatOfGame(r.Cells[0].Value); err != nil { return err }
 		}; return nil
 	})
 	ctx.Step(`^the game "([^"]*)" status should be "([^"]*)"$`, func(g, s string) error { return api.waitForStatus(s) })
