@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -141,23 +142,31 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 // CreateGameHandler - POST /games
 func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
-	type Request struct {
-		ID string `json:"id"`
-	}
-	var req Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	claims, err := h.authenticate(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	g, err := h.svc.CreateGame(r.Context(), req.ID)
+	actualID := uuid.NewString()
+
+	// Create the game
+	g, err := h.svc.CreateGame(r.Context(), actualID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Auto-join the creator at seat 0
+	updatedState, err := h.svc.JoinGame(r.Context(), actualID, claims.UserID, claims.Username, 0)
+	if err != nil {
+		log.Error().Str("game_id", g.ID).Str("user_id", claims.UserID).Err(err).Msg("Failed to auto-join creator")
+		http.Error(w, "failed to auto-join creator", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(g)
+	json.NewEncoder(w).Encode(updatedState)
 }
 
 // JoinGameHandler - POST /games/{id}/join
