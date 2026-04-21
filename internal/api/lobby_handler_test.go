@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -218,7 +219,7 @@ func TestJoinGameHandler_GameNotFound(t *testing.T) {
 func TestJoinGameHandler_GameFull(t *testing.T) {
 	fullGame := game.NewGame("game-123")
 	for i := 0; i < len(fullGame.Players); i++ {
-		fullGame.Players[i] = &game.Player{ID: "player-" + string(rune('1'+i)), Name: "player", Seat: i}
+		fullGame.Players[i] = &game.Player{ID: fmt.Sprintf("player-%d", i+1), Name: "player", Seat: i}
 	}
 
 	redisStore := &fakeRedisStore{
