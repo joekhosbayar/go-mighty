@@ -197,3 +197,38 @@ func TestJoinGameHandler_Unauthorized_QueryToken(t *testing.T) {
 		t.Errorf("expected status %d, got %d. Body: %s", http.StatusUnauthorized, rec.Code, rec.Body.String())
 	}
 }
+
+func TestMoveHandler_Unauthorized_NoToken(t *testing.T) {
+	handler, _, db := setupLobbyTestEnv(t)
+	defer db.Close()
+
+	body := []byte(`{"player_id":"player-1","move_type":"pass","client_version":0,"payload":null}`)
+	req := httptest.NewRequest(http.MethodPost, "/games/game-123/move", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "game-123")
+	rec := httptest.NewRecorder()
+
+	handler.MoveHandler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusUnauthorized, rec.Code, rec.Body.String())
+	}
+}
+
+func TestMoveHandler_Unauthorized_InvalidToken(t *testing.T) {
+	handler, _, db := setupLobbyTestEnv(t)
+	defer db.Close()
+
+	body := []byte(`{"player_id":"player-1","move_type":"pass","client_version":0,"payload":null}`)
+	req := httptest.NewRequest(http.MethodPost, "/games/game-123/move", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer invalid.token.string")
+	req.SetPathValue("id", "game-123")
+	rec := httptest.NewRecorder()
+
+	handler.MoveHandler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusUnauthorized, rec.Code, rec.Body.String())
+	}
+}

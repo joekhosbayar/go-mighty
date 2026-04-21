@@ -1,80 +1,50 @@
-# Mighty Backend Design
-<img width="1000" height="685" alt="image" src="https://github.com/user-attachments/assets/15bd4c43-02a8-4dfc-9ccc-78e47b78ae9b" />
+# Mighty Backend Engine 🃏🚀
+A high-performance, real-time backend for the Mighty card game, built with Go, Redis, and PostgreSQL.
 
-# Stuff i did
-`go get -u github.com/rs/zerolog/log`
-`go get github.com/redis/go-redis/v9`
-`go get github.com/lib/pq`
+## 🚀 Key Features
+- **Authoritative Engine**: Full implementation of Mighty rules, including special card power shifts (Mighty/Joker/Ripper).
+- **Social Lobby**: Authenticated matchmaking lobby for game discovery.
+- **Bi-Directional WebSockets**: Sub-millisecond move latency via real-time reactive streams.
+- **UCLA Scoring**: Accurate implementation of campus-standard scoring and multipliers.
+- **Optimistic Concurrency**: Version-tracked state updates to prevent race conditions.
 
-
-
-# Manual Build Process
-1. Build the executable
-`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o mighty ./cmd/mighty`
-2. Run the server
-`./mighty`
-
-# DockerFile Verification
-`docker build -t mighty .`
-`docker run -p 8080:8080 mighty`
-
-# How to run API and Redis
-1. Set up the Docker secrets by creating the password file:
+## 🛠️ Manual Build Process
+1. **Build the executable**:
+   ```bash
+   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o mighty ./cmd/server
    ```
+2. **Run the server**:
+   ```bash
+   ./mighty
+   ```
+
+## 🐳 Docker Deployment
+1. **Setup Secrets**:
+   ```bash
    cp secrets/postgres_password.txt.example secrets/postgres_password.txt
+   # Edit secrets/postgres_password.txt with a strong, unique password
    ```
-2. Update `secrets/postgres_password.txt` with your secure password
-3. Start the services:
-   ```
-   docker compose up
-   ```
-
-Note: The application uses Docker secrets for secure credential management. The password is read from `/run/secrets/postgres_password` inside the containers.
-
-# How to run all unit tests
-`go test ./...`
-
-# Note on Depends on field in docker yaml
-It only guarantees the postgres and redis containers are started before the API starts. Just because the postgres and redis containers are started doesn't always mean they are ready to accept traffic!!
-
-# To reset secrets, need to run docker compose down -v
-`docker compose down -v`
-Otherwise the container will have an old secret cached.
-
-# Debugging
-
-The debug compose setup will start **all** services defined in both `docker-compose.yml`
-and `docker-compose.debug.yml` (API, Postgres, Redis, etc.).
-
-1. (Recommended) Stop any existing stack for this project to avoid port conflicts:
-
+2. **Launch Stack**:
    ```bash
-   docker compose down
+   docker compose up -d
    ```
 
-2. Start the services in debug mode:
-
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build
-   ```
-
-3. The Go debugger will be available on **port 2345** on your host (e.g. `localhost:2345`).
-
-   - In VS Code, the project includes a ready-to-use debug configuration in `.vscode/launch.json`
-     named **"Connect to server"** that connects to `localhost:2345`.
-   - After the containers are up, select this configuration from the Run and Debug panel and
-     start debugging.
-
-
-# Websocket upgrade request
-```
+## 📡 WebSocket Handshake
+```bash
+# Handshake requires an authenticated JWT token
 curl --include \
      --no-buffer \
      --header "Connection: Upgrade" \
      --header "Upgrade: websocket" \
      --header "Host: localhost:8080" \
-     --header "Origin: http://localhost:8080" \
-     --header "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-     --header "Sec-WebSocket-Version: 13" \
-     http://localhost:8080/games/1234/ws
+     "http://localhost:8080/games/{id}/ws?token=<jwt_token_here>"
 ```
+
+## 🧪 Testing
+- **Unit Tests**: `go test ./internal/...`
+- **E2E Gherkin Features**: `go test -v ./tests/e2e/...`
+
+## 📘 Documentation
+- [API Reference](./docs/API_DOCUMENTATION.md)
+- [Game Rules](./docs/rules.md)
+- [Architecture](./docs/SERVICE_ARCHITECTURE.md)

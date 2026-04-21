@@ -8,6 +8,13 @@ import (
 // ErrInvalidMove is returned when a move is invalid
 var ErrInvalidMove = fmt.Errorf("invalid move")
 
+var suitRank = map[Suit]int{
+	Clubs:    1,
+	Diamonds: 2,
+	Hearts:   3,
+	Spades:   4,
+}
+
 // Power Constants for the Mighty Engine
 const (
 	PowerMighty = 1000
@@ -89,8 +96,17 @@ func (g *GameState) validateBid(p *Player, payload interface{}) error {
 		return fmt.Errorf("%w: not your turn to bid", ErrInvalidMove)
 	}
 
-	if bid.Points < 13 || bid.Points > 20 {
-		return fmt.Errorf("%w: bid points must be between 13 and 20", ErrInvalidMove)
+	if bid.Points < 3 || bid.Points > 10 {
+		return fmt.Errorf("%w: bid points must be between 3 and 10", ErrInvalidMove)
+	}
+	if bid.IsNoTrump {
+		if bid.Suit != None {
+			return fmt.Errorf("%w: no-trump bids must use suit 'none'", ErrInvalidMove)
+		}
+	} else {
+		if _, ok := suitRank[bid.Suit]; !ok {
+			return fmt.Errorf("%w: invalid bid suit", ErrInvalidMove)
+		}
 	}
 
 	// Must be higher than current bid
@@ -99,9 +115,16 @@ func (g *GameState) validateBid(p *Player, payload interface{}) error {
 			return fmt.Errorf("%w: bid must be higher", ErrInvalidMove)
 		}
 		if bid.Points == g.CurrentBid.Points {
-			// NoTrump beats Suit
-			if !bid.IsNoTrump || g.CurrentBid.IsNoTrump {
+			if g.CurrentBid.IsNoTrump && bid.IsNoTrump {
 				return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
+			}
+			if g.CurrentBid.IsNoTrump && !bid.IsNoTrump {
+				return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
+			}
+			if !bid.IsNoTrump && !g.CurrentBid.IsNoTrump {
+				if suitRank[bid.Suit] <= suitRank[g.CurrentBid.Suit] {
+					return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
+				}
 			}
 		}
 	}

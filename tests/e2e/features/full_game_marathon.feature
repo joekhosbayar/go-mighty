@@ -17,17 +17,17 @@ Feature: Full Mighty Game Marathon
     And all players should have 10 cards
     
     # 2. Bidding Phase
-    When "Alice" bids 14 "spades"
+    When "Alice" bids 7 "spades"
     And "Bob" passes
-    And "Carol" bids 15 "spades"
+    And "Carol" bids 8 "spades"
     And "Dave" passes
     And "Eve" passes
-    And "Alice" bids 16 "spades"
+    And "Alice" bids 9 "spades"
     And "Bob" passes
     And "Carol" passes
     And "Dave" passes
     And "Eve" passes
-    Then "Alice" should be the declarer with a bid of 16 "spades"
+    Then "Alice" should be the declarer with a bid of 9 "spades"
     And the game "marathon-999" status should be "exchanging"
     
     # 3. Kitty / Exchanging Phase

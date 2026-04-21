@@ -34,7 +34,7 @@ type PlayCardMove struct {
 // GameConfig holds configuration for the game
 type GameConfig struct {
 	MaxPlayers   int `json:"max_players"`
-	WinningScore int `json:"winning_score"` // usually 13-20
+	WinningScore int `json:"winning_score"` // usually 3-10
 }
 
 // Player represents a participant in the game

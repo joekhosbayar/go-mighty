@@ -134,8 +134,19 @@ func (a *apiFeature) move(username string, moveType game.MoveType, payload inter
 			"payload": payload,
 		}).Post("/games/" + a.activeGameID + "/move")
 	a.lastResponse = resp
-	if err == nil && resp.StatusCode() == http.StatusOK { json.Unmarshal(resp.Body(), a.gameState) }
-	return err
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("move %s failed for %s: %s", moveType, username, resp.String())
+	}
+	if err := json.Unmarshal(resp.Body(), a.gameState); err != nil {
+		return fmt.Errorf(
+			"move %s failed for %s: could not decode response body %q: %w",
+			moveType, username, string(resp.Body()), err,
+		)
+	}
+	return nil
 }
 
 func (a *apiFeature) joinsSeatOfGame(username string, seat int) error {
