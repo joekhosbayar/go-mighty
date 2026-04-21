@@ -1,199 +1,63 @@
-- [Introduction](#introduction)
-- [Players and cards](#players-and-cards)
-- [The deal](#deal)
-- [The bidding](#bidding)
-- [Exchanging cards and calling a partner](#exchange-and-call)
-- [The play](#play)
-- [Scoring](#scoring)
-- [Other numbers of players](#other-numbers)
-- [Variations](#variations)
-- [Tactics, and other information sources](#tactics)
+# Mighty Game Rules
 
 ## Introduction
+Mighty is a high-stakes, point-trick card game featuring bidding and a "Mystery Friend" partner mechanic.
 
-The card game **Mighty** is said to have been invented by Korean college students in the mid 1970's, but it is closely related to the group of Japanese [picture capturing games](./), especially [Napoleon](napoleon.html), which date back to the beginning of the 20th century. Mighty is played mostly by current or former students in Korea, and it is known there by the English sounding name “Mighty”. It is also played by some groups in North America.
+## Players and Cards
+- **Players**: 5 players (Standard).
+- **Deck**: 52 cards + 1 Joker (53 total).
+- **Ranks**: A (High) → 2 (Low).
+- **Points**: A, K, Q, J, and 10 of any suit are "Point Cards". There are 20 total point cards in the deck.
 
-Some of the Korean vocabulary of Mighty uses political terms and words borrowed from *Napoleon*. For example, the declarer is **주공** (“president” or “party leader”). The declarer’s team is **여당** (ruling party), defenders are **야당** (opposition party), a bid is called **공약** (pledge), and the bidding phase is **선거** (election). This political theme likely refers to the military junta era during Korea’s Third Republic.
+## Special Cards (The Magic Cards)
 
-Mighty is a [point-trick game](../class/trick.html#point) with bidding. In each hand the high bidder chooses a partner by calling a card, and these two players try to take enough scoring cards (A, K, Q, J, 10) to fulfill the bid. The five-player game is described first, followed by versions for [other numbers of players](#other-numbers). Many [variations](#variations) exist.
+### 1. The Mighty
+The strongest card in the game. It wins any trick it is played in.
+- **Normal**: Ace of Spades (♠A).
+- **If Spades are Trump**: Ace of Clubs (♣A).
 
-*This page is based on contributions from Yishin Cho, Jun Chulmin, u fm, Miller Kim, John Pannell, and Dan Roth.*
+### 2. The Joker
+The second strongest card. It wins any trick unless:
+- The Mighty is played in the same trick.
+- It is the **First Trick** or the **Last Trick** of the hand (in which case it loses all power).
+- The **Joker Caller** was led and called for the Joker.
 
-## Players and cards
+### 3. The Joker Caller (The Ripper)
+A nemesis for the Joker.
+- **Normal**: Three of Clubs (♣3).
+- **If Clubs are Trump**: Three of Spades (♠3).
+- **Rule**: If led, the player can choose to "Call the Joker". The player holding the Joker **MUST** play it, and the Joker loses all power for that trick.
+- **Exception**: If the Joker holder also has the Mighty, they can play the Mighty instead to win the trick and save their Joker.
 
-The basic game is played by five players using a standard 52-card deck plus one joker (53 cards total).
+## The Game Flow
 
-Card ranking (high → low):
+### 1. Bidding Phase
+Players bid for the contract, specifying the number of tricks (3-10) and the trump suit (or No-Trump).
+- Minimum bid: 3.
+- No-Trump bids beat suit bids of the same level. Suit bids are ranked: Clubs < Diamonds < Hearts < Spades.
+- Bidding ends after 4 consecutive passes. The winner becomes the **Declarer**.
 
-**A K Q J 10 9 8 7 6 5 4 3 2**
+### 2. Exchanging Phase (The Kitty)
+- 3 cards are dealt face-down as the "Kitty".
+- The Declarer takes the Kitty and then discards 3 cards of their choice back to their score pile.
 
-Each **A, K, Q, J, 10** is worth **1 point**, for **20 total points** in the deck.
+### 3. Calling the Friend
+The Declarer calls out a specific card (e.g., "Ace of Hearts").
+- The player holding that card becomes the **Partner**.
+- The Partner remains secret until the called card is played.
+- **No Friend**: The Declarer can choose to play alone for doubled points.
 
-### Special cards
+### 4. Playing Phase
+- The Declarer leads the first trick.
+- **Rule**: No trump can be led on the first trick unless the player has only trumps.
+- **Rule**: The Mighty cannot be played on the first trick unless the player cannot follow the lead suit.
+- Players must follow the lead suit if possible.
 
-- **Mighty**
-    - ♠A unless spades are trumps, then ♦A
-    - Highest card in the game
-
-- **Joker**
-    - Second highest
-    - Loses power if the Ripper is led
-
-- **Ripper (Joker Hunter)**
-    - ♣3 unless clubs are trumps, then ♠3
-    - Can force the Joker to be played and remove its power
-
-The Mighty and Joker together are called the **Magic Cards**.
-
-Play proceeds clockwise.
-
-## Deal
-
-The first dealer is chosen randomly. Thereafter, the declarer’s partner deals the next hand. If the declarer played alone, the declarer deals.
-
-Each player receives **10 cards**, and **3 cards** are dealt face-down to the **kitty** (blind).  
-Typical dealing pattern: 1 → 2 → 3 → 4 cards per player.
-
-## Bidding
-
-The dealer opens bidding in the first hand; thereafter, the previous declarer opens.
-
-- Minimum bid: **13**
-- Maximum bid: **20**
-- Bids specify:
-    - Points
-    - Trump suit or **no-trump**
-
-Examples:
-- 13 hearts
-- 14 no-trump
-- 16 spades
-- 20 clubs
-
-Rules:
-- Higher points beat lower points
-- No-trump beats the same point value with a suit
-- No ranking among suits
-- Passing is final
-
-The last remaining bidder becomes the **declarer**, and their bid is the **contract**.
-
-### Redeal
-
-If all five players pass, the cards are redealt.
-
-A redeal may also be demanded if a player’s hand totals **½ point or less**, calculated as:
-
-| Card | Value |
-|-----|------|
-| Mighty (default ♠A) | 0 |
-| Joker | -1 |
-| A, K, Q, J (except Mighty) | +1 |
-| 10 | +½ |
-| 2–9 | 0 |
-
-## Exchanging cards and calling a partner
-
-The declarer:
-1. Picks up the **3-card kitty**
-2. Discards **3 cards**
-3. May score points from discarded scoring cards
-
-The declarer may raise the bid and/or change trump according to defined rules.
-
-### Choosing a partner
-
-Options:
-- **Call a card** (any card, including Mighty or Joker)
-- **Winner of first trick**
-- **No friend** (play alone, doubled score)
-
-If the bid is **20 no-trump**, the declarer may also request a specific lead from the partner.
-
-## The Play
-
-- Declarer leads the first trick
-- No trump lead on trick one unless holding only trumps
-- Players must follow suit when possible
-
-Trick priority:
-1. Mighty
-2. Joker (unless neutralized)
-3. Highest trump
-4. Highest card of led suit
-
-### Joker and Ripper rules
-
-- Joker can be played anytime
-- Ripper may force Joker to be played (except first trick)
-- Joker loses power when ripped
-
-## Scoring
-
-Scores always sum to **zero**.
-
-Let:
-- **B** = bid
-- **P** = points taken
-- **M** = minimum bid (13)
-
-### Success
-S = 2 × (B − M) + (P − B)
-
-### Failure
-S = B − P
-
-
-Payments:
-- Declarer: ±2S
-- Partner: ±S
-- Each opponent: ∓S
-
-### Doubles apply if:
-- Run (20 points)
-- Back run (defenders ≥11 points)
-- No-trump
-- No friend
-
-### Examples
-
-- **15♦, take 16** → S = 5
-- **16 NT, take 18** → S = 16
-- **17♥, take 20** → S = 22
-
-## Other numbers of players
-
-Variants exist for **3–8 players**, adjusting:
-- Deck size
-- Partnerships
-- Minimum bids
-- Scoring
-
-(Details preserved from original text.)
-
-## Variations
-
-Mighty has many evolving variants covering:
-- Bidding rules
-- Redeal conditions
-- Partner selection
-- Joker behavior
-- Alternative scoring systems
-
-### Scoring variants
-
-Common alternatives:
-- `P − 10`
-- `P − M`
-- `P − M + 1`
-
-Additional doubles may apply for:
-- No trump
-- Burying Mighty/Joker
-- No friend
-- Run or back run
-
-Doubles may be cumulative.
-
----
-
+## Scoring (UCLA Campus Standard)
+- **Base Score**: `(Contract * 10) + (OverTricks * 5)`.
+- **Team Split**: The Declarer wins the full score, the Partner wins half.
+- **Multipliers**:
+    - **No-Trump**: 2x
+    - **No-Friend**: 2x
+    - **10-Bid**: 2x
+- **Cap**: Maximum score or loss is capped at **800 points**.

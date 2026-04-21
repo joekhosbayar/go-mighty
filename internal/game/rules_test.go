@@ -21,14 +21,14 @@ func TestGameFlow(t *testing.T) {
 	}
 
 	// 3. Bid
-	// Player 0 (current turn) bids 13 S
-	err := g.ValidateMove(g.Players[0].ID, MoveBid, Bid{Points: 13, Suit: Spades})
+	// Player 0 (current turn) bids 7 S
+	err := g.ValidateMove(g.Players[0].ID, MoveBid, Bid{Points: 7, Suit: Spades})
 	if err != nil {
 		t.Errorf("Valid bid rejected: %v", err)
 	}
-	g.ApplyMove(g.Players[0].ID, MoveBid, Bid{Points: 13, Suit: Spades})
+	g.ApplyMove(g.Players[0].ID, MoveBid, Bid{Points: 7, Suit: Spades})
 
-	if g.CurrentBid == nil || g.CurrentBid.Points != 13 {
+	if g.CurrentBid == nil || g.CurrentBid.Points != 7 {
 		t.Errorf("Bid not applied")
 	}
 
@@ -48,7 +48,7 @@ func TestGameFlow(t *testing.T) {
 
 	// Player 4 bids higher?
 	// Validate low bid
-	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 13, Suit: Diamonds}) // Same points, suit -> Invalid (unless NT)
+	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 7, Suit: Diamonds}) // Same points, suit -> Invalid (unless NT)
 	if err == nil {
 		t.Errorf("Expected error for low bid")
 	}

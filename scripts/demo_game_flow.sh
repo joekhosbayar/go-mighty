@@ -93,7 +93,7 @@ VERSION=$(jq '.version' <<< "$GAME_STATE")
 echo -e "\nGame is now in 'bidding' phase."
 
 # 3. Valid Bid via REST (If MoveHandler is authenticated, pass Bearer token)
-echo "3. Player 1 (Alice) Bids 13 Spades via REST /move..."
+echo "3. Player 1 (Alice) Bids 7 Spades via REST /move..."
 # Note: Currently, /move might still require player_id if not fully refactored, but we'll include the token just in case
 RESPONSE=$(curl -s -X POST "${BASE_URL}/games/${GAME_ID}/move" \
   -H "Content-Type: application/json" \
@@ -102,7 +102,7 @@ RESPONSE=$(curl -s -X POST "${BASE_URL}/games/${GAME_ID}/move" \
     \"player_id\": \"${USER_IDS[0]}\",
     \"move_type\": \"bid\",
     \"client_version\": ${VERSION},
-    \"payload\": {\"suit\":\"spades\", \"points\":13}
+    \"payload\": {\"suit\":\"spades\", \"points\":7}
   }")
 
 if echo "$RESPONSE" | jq . >/dev/null 2>&1; then

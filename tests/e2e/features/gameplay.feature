@@ -16,7 +16,7 @@ Feature: Mighty Gameplay
     Then the game "mighty-match-999" status should be "bidding"
     And each player should have 10 cards in their hand
     
-    When "Alice" bids 13 "spades"
+    When "Alice" bids 7 "spades"
     And "Bob", "Carol", "Dave", and "Eve" pass
     Then "Alice" should be the declarer
     And the game "mighty-match-999" status should be "exchanging"

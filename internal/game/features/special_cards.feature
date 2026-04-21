@@ -7,7 +7,7 @@ Feature: Special Card Mechanics
     Given 5 authenticated players: "Alice", "Bob", "Carol", "Dave", "Eve"
     And "Alice" creates a high-stakes game "special-test-888"
     When "Alice", "Bob", "Carol", "Dave", "Eve" join the game "special-test-888"
-    And "Alice" wins a "13 diamonds" contract
+    And "Alice" wins a "7 diamonds" contract
     And "Alice" discards 3 cards
     And "Alice" calls the "Ace of Hearts" as the friend
     Then the game "special-test-888" status should be "playing"

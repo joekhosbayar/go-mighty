@@ -134,8 +134,14 @@ func (a *apiFeature) move(username string, moveType game.MoveType, payload inter
 			"payload": payload,
 		}).Post("/games/" + a.activeGameID + "/move")
 	a.lastResponse = resp
-	if err == nil && resp.StatusCode() == http.StatusOK { json.Unmarshal(resp.Body(), a.gameState) }
-	return err
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode() != http.StatusOK {
+		return fmt.Errorf("move %s failed for %s: %s", moveType, username, resp.String())
+	}
+	json.Unmarshal(resp.Body(), a.gameState)
+	return nil
 }
 
 func (a *apiFeature) joinsSeatOfGame(username string, seat int) error {
