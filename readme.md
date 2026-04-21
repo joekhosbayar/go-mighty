@@ -22,7 +22,7 @@ A high-performance, real-time backend for the Mighty card game, built with Go, R
 1. **Setup Secrets**:
    ```bash
    cp secrets/postgres_password.txt.example secrets/postgres_password.txt
-   # Edit secrets/postgres_password.txt with 'mightypassword'
+   # Edit secrets/postgres_password.txt with a strong, unique password
    ```
 2. **Launch Stack**:
    ```bash

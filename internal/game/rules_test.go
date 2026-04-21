@@ -46,9 +46,8 @@ func TestGameFlow(t *testing.T) {
 	g.ApplyMove(g.Players[2].ID, MovePass, nil)
 	g.ApplyMove(g.Players[3].ID, MovePass, nil)
 
-	// Player 4 bids higher?
-	// Validate low bid
-	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 7, Suit: Diamonds}) // Same points, suit -> Invalid (unless NT)
+	// Player 4 attempts same-point lower-suit bid; should be rejected
+	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 7, Suit: Diamonds})
 	if err == nil {
 		t.Errorf("Expected error for low bid")
 	}
@@ -317,5 +316,25 @@ func TestScoring(t *testing.T) {
 	score, _ = g.CalculateFinalScore()
 	if score != 800 {
 		t.Errorf("Expected ultimate score 800, got %v", score)
+	}
+}
+
+func TestValidateBid_NoTrumpAndSuitValidation(t *testing.T) {
+	g := NewGame("test-bid-validation")
+	g.Status = PhaseBidding
+	g.CurrentTurn = 0
+	g.Players[0] = &Player{ID: "P1", Seat: 0}
+
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 7, Suit: Suit("invalid")}); err == nil {
+		t.Fatalf("expected invalid suit bid to be rejected")
+	}
+
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 7, Suit: Spades, IsNoTrump: true}); err == nil {
+		t.Fatalf("expected no-trump bid with non-none suit to be rejected")
+	}
+
+	g.CurrentBid = &Bid{Points: 8, Suit: None, IsNoTrump: true}
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 8, Suit: None, IsNoTrump: true}); err == nil {
+		t.Fatalf("expected equal no-trump bid to be rejected")
 	}
 }

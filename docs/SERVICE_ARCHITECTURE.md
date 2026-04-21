@@ -53,7 +53,7 @@ Stored as JSON with the following key fields:
 
 ## Real-Time Layer (WebSockets)
 - **Bi-Directional**: Supports both state broadcasts (Outbound) and game moves (Inbound).
-- **Handshake Authentication**: Requires a JWT token in the query string (`?token=...`).
+- **Handshake Authentication**: Supports `Authorization: Bearer <token>` and accepts query token (`?token=...`) as fallback.
 - **Heartbeat**: 30-second ping/pong cycle to manage connection health.
 
 ## Special Logic Enforcement

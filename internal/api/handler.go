@@ -200,6 +200,12 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 
 // MoveHandler - POST /games/{id}/move
 func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
+	claims, err := h.authenticate(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	gameID := r.PathValue("id")
 
 	type Request struct {
@@ -213,6 +219,7 @@ func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	req.PlayerID = claims.UserID
 
 	convertedPayload, err := ConvertPayload(req.MoveType, req.Payload)
 	if err != nil {

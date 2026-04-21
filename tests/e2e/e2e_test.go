@@ -140,7 +140,7 @@ func (a *apiFeature) move(username string, moveType game.MoveType, payload inter
 	if resp.StatusCode() != http.StatusOK {
 		return fmt.Errorf("move %s failed for %s: %s", moveType, username, resp.String())
 	}
-	json.Unmarshal(resp.Body(), a.gameState)
+	if err := json.Unmarshal(resp.Body(), a.gameState); err != nil { return fmt.Errorf("move %s failed for %s: could not decode response body %q: %w", moveType, username, string(resp.Body()), err) }
 	return nil
 }
 

@@ -11,7 +11,7 @@ Identity is managed via JSON Web Tokens (JWT).
 2. **Login**: Authenticate at `/auth/login` to receive a JWT.
 3. **Usage**: 
    - **REST**: Attach `Authorization: Bearer <token>` header.
-   - **WebSockets**: Pass `?token=<token>` as a query parameter.
+   - **WebSockets**: Use `Authorization: Bearer <token>` header, or pass `?token=<token>` as a fallback.
 
 ---
 
@@ -74,6 +74,7 @@ Retrieves the current full state of the game.
 Submits a game action. Recommended only for slow-turn actions or as a WebSocket fallback.
 
 **Endpoint**: `POST /games/{id}/move`
+**Authentication**: Required (Bearer Token)
 **Request Body**:
 ```json
 {
@@ -114,6 +115,7 @@ Clients can send moves directly over the socket:
 
 ### 1. Bid / Pass
 - **bid**: `{"suit": "spades", "points": 7}` (Points: 3-10)
+- **no-trump bid**: `{"suit": "none", "points": 8, "is_no_trump": true}`
 - **pass**: `null`
 
 ### 2. Discard
