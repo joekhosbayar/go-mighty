@@ -7,9 +7,7 @@ if ! command -v jq &> /dev/null; then
 fi
 
 BASE_URL="http://localhost:8080"
-GAME_ID="game_demo_$(date +%s)"
 USERS=("alice" "bob" "carol" "dave" "eve")
-SEATS=(0 1 2 3 4)
 TOKENS=()
 USER_IDS=()
 LAST_INDEX=$((${#USERS[@]} - 1))
@@ -61,34 +59,34 @@ for i in "${!USERS[@]}"; do
   TOKENS+=("$TOKEN")
 done
 
-echo -e "\n1. Creating Game ${GAME_ID}..."
-curl -s -X POST "${BASE_URL}/games" \
-  -H "Content-Type: application/json" \
-  -d "{\"id\": \"${GAME_ID}\"}" | jq .
+echo -e "\n1. Player 0 (Alice) Creating Game..."
+CREATE_RES=$(curl -sS --fail-with-body -X POST "${BASE_URL}/games" \
+  -H "Authorization: Bearer ${TOKENS[0]}")
+
+GAME_ID=$(jq -er '.id' <<< "$CREATE_RES")
+echo "Created Game: ${GAME_ID}"
+echo "$CREATE_RES" | jq .
 echo -e "\n"
 
-echo "2. Joining 5 players (using Bearer Tokens)..."
-for i in "${!USERS[@]}"; do
-  SEAT="${SEATS[$i]}"
+echo "2. Joining 4 other players (using Bearer Tokens)..."
+for i in $(seq 1 $LAST_INDEX); do
   TOKEN="${TOKENS[$i]}"
-  echo "Player ${i} joining at seat ${SEAT}..."
+  echo "Player ${i} joining..."
   
   JOIN_RES=$(curl -sS --fail-with-body -X POST "${BASE_URL}/games/${GAME_ID}/join" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${TOKEN}" \
-    -d "{\"seat\":${SEAT}}")
+    -H "Authorization: Bearer ${TOKEN}")
 
   GAME_STATE="$JOIN_RES"
   if [ "$i" -eq "$LAST_INDEX" ]; then
     echo "Joining player $((LAST_INDEX + 1)) (Triggering Deal)..."
     echo "$GAME_STATE" | jq .status
   else
-    echo "$JOIN_RES" | jq ".players[$SEAT]"
+    echo "$JOIN_RES" | jq ".players[$i]"
   fi
 done
 
 # Extract current version
-VERSION=$(jq '.version' <<< "$GAME_STATE")
+VERSION=$(jq -er '.version' <<< "$GAME_STATE")
 
 echo -e "\nGame is now in 'bidding' phase."
 
@@ -121,10 +119,10 @@ cat <<EOF
 {
   "type": "MOVE",
   "move_type": "bid",
-  "client_version": ${VERSION},
+  "client_version": 2,
   "payload": {
     "suit": "hearts",
-    "points": 14
+    "points": 8
   }
 }
 EOF

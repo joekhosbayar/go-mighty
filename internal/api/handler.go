@@ -20,7 +20,7 @@ import (
 
 type GameService interface {
 	CreateGame(ctx context.Context, id string) (*game.GameState, error)
-	JoinGame(ctx context.Context, gameID, playerID, playerName string, seat int) (*game.GameState, error)
+	JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.GameState, error)
 	ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.GameState, error)
 	Subscribe(ctx context.Context, gameID string) *redis.PubSub
 	GetGame(ctx context.Context, gameID string) (*game.GameState, error)
@@ -158,7 +158,7 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-join the creator at seat 0
-	updatedState, err := h.svc.JoinGame(r.Context(), actualID, claims.UserID, claims.Username, 0)
+	updatedState, err := h.svc.JoinGame(r.Context(), actualID, claims.UserID, claims.Username)
 	if err != nil {
 		log.Error().Str("game_id", g.ID).Str("user_id", claims.UserID).Err(err).Msg("Failed to auto-join creator")
 		http.Error(w, "failed to auto-join creator", http.StatusInternalServerError)
@@ -179,16 +179,7 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 
 	gameID := r.PathValue("id")
 
-	type Request struct {
-		Seat int `json:"seat"`
-	}
-	var req Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	g, err := h.svc.JoinGame(r.Context(), gameID, claims.UserID, claims.Username, req.Seat)
+	g, err := h.svc.JoinGame(r.Context(), gameID, claims.UserID, claims.Username)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

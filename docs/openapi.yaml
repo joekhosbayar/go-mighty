@@ -130,20 +130,6 @@ paths:
           schema:
             type: string
           description: The game ID
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - seat
-              properties:
-                seat:
-                  type: integer
-                  description: Desired seat index (0-4)
-                  minimum: 0
-                  maximum: 4
       responses:
         '200':
           description: Player joined successfully

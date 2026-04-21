@@ -45,13 +45,7 @@ Allows a player to take an available seat.
 
 **Endpoint**: `POST /games/{id}/join`
 **Authentication**: Required (Bearer Token)
-**Request Body**:
-```json
-{
-  "seat": 1   // Seat number (0-4)
-}
-```
-**Notes**: Game automatically starts and deals once the 5th player joins.
+**Notes**: Seat assignment is automatic. Game automatically starts and deals once the 5th player joins.
 
 ---
 
