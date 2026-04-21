@@ -348,7 +348,7 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 			}
 		} else {
 			g.CurrentBid = &bid
-			g.Declarer = p.Seat                  // Potential declarer
+			g.Declarer = p.Seat // Potential declarer
 			g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
 		}
 		// In rotation, move turn to next player?
