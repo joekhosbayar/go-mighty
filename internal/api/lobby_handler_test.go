@@ -198,6 +198,50 @@ func TestJoinGameHandler_Unauthorized_QueryToken(t *testing.T) {
 	}
 }
 
+func TestJoinGameHandler_GameNotFound(t *testing.T) {
+	handler, _, db := setupLobbyTestEnv(t)
+	defer db.Close()
+
+	token := generateValidToken("player-1", "alice")
+	req := httptest.NewRequest(http.MethodPost, "/games/missing/join", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.SetPathValue("id", "missing")
+	rec := httptest.NewRecorder()
+
+	handler.JoinGameHandler(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusNotFound, rec.Code, rec.Body.String())
+	}
+}
+
+func TestJoinGameHandler_GameFull(t *testing.T) {
+	fullGame := game.NewGame("game-123")
+	for i := 0; i < len(fullGame.Players); i++ {
+		fullGame.Players[i] = &game.Player{ID: "player-" + string(rune('1'+i)), Name: "player", Seat: i}
+	}
+
+	redisStore := &fakeRedisStore{
+		games: map[string]*game.GameState{
+			"game-123": fullGame,
+		},
+	}
+	handler, _, db := setupLobbyTestEnvWithRedis(t, redisStore)
+	defer db.Close()
+
+	token := generateValidToken("player-new", "alice")
+	req := httptest.NewRequest(http.MethodPost, "/games/game-123/join", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.SetPathValue("id", "game-123")
+	rec := httptest.NewRecorder()
+
+	handler.JoinGameHandler(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusConflict, rec.Code, rec.Body.String())
+	}
+}
+
 func TestMoveHandler_Unauthorized_NoToken(t *testing.T) {
 	handler, _, db := setupLobbyTestEnv(t)
 	defer db.Close()

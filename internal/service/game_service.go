@@ -12,7 +12,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var ErrRedisStoreNotInitialized = errors.New("redis store not initialized")
+var (
+	ErrRedisStoreNotInitialized = errors.New("redis store not initialized")
+	ErrGameNotFound             = errors.New("game not found")
+	ErrGameFull                 = errors.New("game is full")
+)
 
 type RedisStore interface {
 	SaveGame(ctx context.Context, g *game.GameState) error
@@ -68,12 +72,12 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 		return nil, fmt.Errorf("failed to load game: %w", err)
 	}
 	if g == nil {
-		return nil, fmt.Errorf("game not found")
+		return nil, ErrGameNotFound
 	}
 
 	// Logic: Find seat
 	seat := -1
-	
+
 	// First, check if player is already in the game
 	for i, p := range g.Players {
 		if p != nil && p.ID == playerID {
@@ -98,7 +102,7 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 	}
 
 	if seat == -1 {
-		return nil, fmt.Errorf("game is full")
+		return nil, ErrGameFull
 	}
 
 	g.Players[seat] = &game.Player{ID: playerID, Name: playerName, Seat: seat, IsConnected: true, Hand: []game.Card{}, Points: []game.Card{}}

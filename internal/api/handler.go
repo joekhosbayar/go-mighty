@@ -181,6 +181,14 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 
 	g, err := h.svc.JoinGame(r.Context(), gameID, claims.UserID, claims.Username)
 	if err != nil {
+		if errors.Is(err, service.ErrGameNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, service.ErrGameFull) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

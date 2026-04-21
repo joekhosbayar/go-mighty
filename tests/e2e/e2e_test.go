@@ -150,10 +150,10 @@ func (a *apiFeature) move(username string, moveType game.MoveType, payload inter
 }
 
 func (a *apiFeature) joinsSeatOfGame(username string, seat int) error {
+	_ = seat
 	token := a.tokens[username]
 	resp, err := a.client.R().
 		SetHeader("Authorization", "Bearer "+token).
-		SetBody(map[string]interface{}{"seat": seat}).
 		Post("/games/" + a.activeGameID + "/join")
 	if err != nil { return err }
 	if resp.StatusCode() != http.StatusOK { return fmt.Errorf("join failed: %s", resp.String()) }

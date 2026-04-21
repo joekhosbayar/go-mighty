@@ -63,7 +63,11 @@ echo -e "\n1. Player 0 (Alice) Creating Game..."
 CREATE_RES=$(curl -sS --fail-with-body -X POST "${BASE_URL}/games" \
   -H "Authorization: Bearer ${TOKENS[0]}")
 
-GAME_ID=$(jq -er '.id' <<< "$CREATE_RES")
+if ! GAME_ID=$(jq -er '.id' <<< "$CREATE_RES"); then
+  echo "Error: Failed to extract game id from create-game response"
+  echo "$CREATE_RES"
+  exit 1
+fi
 echo "Created Game: ${GAME_ID}"
 echo "$CREATE_RES" | jq .
 echo -e "\n"
@@ -119,7 +123,7 @@ cat <<EOF
 {
   "type": "MOVE",
   "move_type": "bid",
-  "client_version": 2,
+  "client_version": ${VERSION},
   "payload": {
     "suit": "hearts",
     "points": 8
