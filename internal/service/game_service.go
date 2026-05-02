@@ -12,7 +12,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var ErrRedisStoreNotInitialized = errors.New("redis store not initialized")
+var (
+	ErrRedisStoreNotInitialized = errors.New("redis store not initialized")
+	ErrGameNotFound             = errors.New("game not found")
+	ErrGameFull                 = errors.New("game is full")
+)
 
 type RedisStore interface {
 	SaveGame(ctx context.Context, g *game.GameState) error
@@ -54,7 +58,7 @@ func (s *GameService) CreateGame(ctx context.Context, id string) (*game.GameStat
 }
 
 // JoinGame handles player joining
-func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName string, seat int) (*game.GameState, error) {
+func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.GameState, error) {
 	// Lock
 	_, err := s.redisStore.AcquireLock(ctx, gameID)
 	if err != nil {
@@ -68,28 +72,39 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 		return nil, fmt.Errorf("failed to load game: %w", err)
 	}
 	if g == nil {
-		return nil, fmt.Errorf("game not found")
+		return nil, ErrGameNotFound
 	}
 
-	// Logic: Add player
-	if seat < 0 || seat > 4 {
-		return nil, fmt.Errorf("invalid seat")
-	}
-	if g.Players[seat] != nil {
-		if g.Players[seat].ID == playerID {
-			g.Players[seat].Name = playerName
-			g.Players[seat].IsConnected = true
+	// Logic: Find seat
+	seat := -1
+
+	// First, check if player is already in the game
+	for i, p := range g.Players {
+		if p != nil && p.ID == playerID {
+			g.Players[i].Name = playerName
+			g.Players[i].IsConnected = true
 			g.Version++
 			g.UpdatedAt = time.Now()
 
 			if err := s.redisStore.SaveGame(ctx, g); err != nil {
 				return nil, err
 			}
-
 			return g, nil // Already in seat; refresh connection state
 		}
-		return nil, fmt.Errorf("seat occupied")
 	}
+
+	// If not already in the game, find the first available seat
+	for i, p := range g.Players {
+		if p == nil {
+			seat = i
+			break
+		}
+	}
+
+	if seat == -1 {
+		return nil, ErrGameFull
+	}
+
 	g.Players[seat] = &game.Player{ID: playerID, Name: playerName, Seat: seat, IsConnected: true, Hand: []game.Card{}, Points: []game.Card{}}
 	g.Version++
 	g.UpdatedAt = time.Now()

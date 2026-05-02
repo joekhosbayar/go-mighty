@@ -59,7 +59,7 @@ func TestJoinGameRejoinSameSeatRefreshesConnectionState(t *testing.T) {
 	redisStore := &fakeRedisStore{game: g}
 	svc := &GameService{redisStore: redisStore}
 
-	updatedGame, err := svc.JoinGame(context.Background(), "game-1", "player-1", "New Name", 0)
+	updatedGame, err := svc.JoinGame(context.Background(), "game-1", "player-1", "New Name")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
