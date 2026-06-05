@@ -49,38 +49,59 @@ type OutgoingWSError struct {
 
 // WSHandler handles websocket connections
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.authenticateWS(r)
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	gameID := r.PathValue("id")
-
-	pubsub := h.svc.Subscribe(r.Context(), gameID)
-	if pubsub == nil {
-		http.Error(w, "websocket unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	defer pubsub.Close()
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error().Str("game_id", gameID).Str("user_id", claims.UserID).Err(err).Msg("Failed to upgrade websocket")
+		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
 		return
 	}
 	defer conn.Close()
+
+	var wsWriteMu sync.Mutex
+	sendError := func(errMsg string) {
+		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
+			log.Warn().Str("game_id", gameID).Err(wsErr).Msg("Failed to send websocket error")
+		}
+	}
+
+	// 1. Wait for First Message Auth with 5s timeout
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, authMessage, err := conn.ReadMessage()
+	if err != nil {
+		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to read auth message or timed out")
+		return
+	}
+
+	var authReq struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(authMessage, &authReq); err != nil || authReq.Type != "AUTH" {
+		sendError("expected AUTH message")
+		return
+	}
+
+	claims, err := h.authSvc.ValidateToken(authReq.Token)
+	if err != nil {
+		sendError("unauthorized")
+		return
+	}
+
+	// 2. Reset deadline after successful auth
+	conn.SetReadDeadline(time.Time{})
+
+	pubsub := h.svc.Subscribe(r.Context(), gameID)
+	if pubsub == nil {
+		sendError("websocket unavailable")
+		return
+	}
+	defer pubsub.Close()
 
 	ch := pubsub.Channel()
 
 	// Create a channel to signal connection closure
 	done := make(chan struct{})
-	var wsWriteMu sync.Mutex
-	sendError := func(errMsg string) {
-		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
-			log.Warn().Str("game_id", gameID).Str("user_id", claims.UserID).Err(wsErr).Msg("Failed to send websocket error")
-		}
-	}
 
 	// Write loop
 	go func() {

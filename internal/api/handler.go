@@ -60,20 +60,6 @@ func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
 	return h.authSvc.ValidateToken(tokenString)
 }
 
-func (h *Handler) authenticateWS(r *http.Request) (*service.AuthClaims, error) {
-	claims, err := h.authenticate(r)
-	if err == nil {
-		return claims, nil
-	}
-
-	tokenString := r.URL.Query().Get("token")
-	if tokenString == "" {
-		return nil, errors.New("missing authentication token")
-	}
-
-	return h.authSvc.ValidateToken(tokenString)
-}
-
 // SignupHandler - POST /auth/signup
 func (h *Handler) SignupHandler(w http.ResponseWriter, r *http.Request) {
 	type Request struct {

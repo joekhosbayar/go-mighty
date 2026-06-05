@@ -9,10 +9,9 @@ RESTful and WebSocket API for the Mighty multiplayer card game. All state-changi
 Identity is managed via JSON Web Tokens (JWT). 
 1. **Signup**: Register at `/auth/signup` to receive a permanent UUID.
 2. **Login**: Authenticate at `/auth/login` to receive a JWT.
-3. **Usage**: 
+3. **Usage**:
    - **REST**: Attach `Authorization: Bearer <token>` header.
-   - **WebSockets**: Use `Authorization: Bearer <token>` header, or pass `?token=<token>` as a fallback.
-
+   - **WebSockets**: Send `{"type": "AUTH", "token": "<token>"}` as the first message within 5 seconds of connecting.
 ---
 
 ## Auth Endpoints
@@ -84,7 +83,16 @@ Submits a game action. Recommended only for slow-turn actions or as a WebSocket 
 ## WebSocket Interface
 The primary interface for real-time Mighty gameplay. Supports bi-directional actions.
 
-**Endpoint**: `GET /games/{id}/ws?token=<jwt>`
+**Endpoint**: `GET /games/{id}/ws`
+
+### Authentication
+The WebSocket connection uses the "First Message" authentication pattern. Once connected, you must send an `AUTH` message within 5 seconds before any game updates are sent or accepted.
+```json
+{
+  "type": "AUTH",
+  "token": "your.jwt.token"
+}
+```
 
 ### Outbound Events
 The server broadcasts the full `Game` JSON object to all connected clients whenever any state change occurs.

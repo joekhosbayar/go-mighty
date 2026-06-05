@@ -116,7 +116,13 @@ fi
 
 echo -e "\n4. Real-time WebSocket details:"
 echo "To connect to the WebSocket and submit moves, use a client (e.g. wscat):"
-echo "  wscat -c \"ws://localhost:8080/games/${GAME_ID}/ws?token=${TOKENS[0]}\""
+echo "  wscat -c \"ws://localhost:8080/games/${GAME_ID}/ws\""
+echo ""
+echo "First, authenticate your connection:"
+echo '{
+  "type": "AUTH",
+  "token": "'${TOKENS[0]}'"
+}'
 echo ""
 echo "Example payload to send over WebSocket:"
 cat <<EOF
