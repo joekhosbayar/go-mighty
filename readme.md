@@ -31,13 +31,16 @@ A high-performance, real-time backend for the Mighty card game, built with Go, R
 
 ## 📡 WebSocket Handshake
 ```bash
-# Handshake requires an authenticated JWT token
-curl --include \
-     --no-buffer \
-     --header "Connection: Upgrade" \
-     --header "Upgrade: websocket" \
-     --header "Host: localhost:8080" \
-     "http://localhost:8080/games/{id}/ws?token=<jwt_token_here>"
+# Connect and send AUTH as the first message within 5 seconds
+wscat -c "ws://localhost:8080/games/{id}/ws"
+# (alternative) websocat ws://localhost:8080/games/{id}/ws
+```
+Once connected, send the authentication payload within 5 seconds:
+```json
+{
+  "type": "AUTH",
+  "token": "<jwt_token_here>"
+}
 ```
 
 ## 🧪 Testing

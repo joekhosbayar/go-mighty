@@ -152,8 +152,7 @@ func TestWSHandler_RejectEarlyData(t *testing.T) {
 	}
 	defer conn.Close()
 
-	token := generateValidToken("testuser", "test")
-	req := "GET /games/test-game/ws?token=" + token + " HTTP/1.1\r\n" +
+	req := "GET /games/test-game/ws HTTP/1.1\r\n" +
 		"Host: localhost:" + port + "\r\n" +
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
@@ -185,12 +184,8 @@ func dialWS(t *testing.T, server *httptest.Server, path string, token string) *w
 	t.Helper()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + path
-	header := http.Header{}
-	if token != "" {
-		header.Set("Authorization", "Bearer "+token)
-	}
 
-	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, header)
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		if resp != nil {
 			t.Fatalf("websocket dial failed: %v (status=%d)", err, resp.StatusCode)
@@ -198,6 +193,17 @@ func dialWS(t *testing.T, server *httptest.Server, path string, token string) *w
 		t.Fatalf("websocket dial failed: %v", err)
 	}
 	t.Cleanup(func() { conn.Close() })
+
+	if token != "" {
+		authMsg := map[string]string{
+			"type":  "AUTH",
+			"token": token,
+		}
+		if err := conn.WriteJSON(authMsg); err != nil {
+			t.Fatalf("failed to send auth message: %v", err)
+		}
+	}
+
 	return &websocketConn{Conn: conn}
 }
 
@@ -212,6 +218,25 @@ func TestWSHandler_InvalidJSONReturnsErrorFrame(t *testing.T) {
 
 	msg := conn.ReadText(t)
 	if msg.Type != "ERROR" || !strings.Contains(msg.Error, "invalid message format") {
+		t.Fatalf("unexpected ws error response: %+v", msg)
+	}
+}
+
+func TestWSHandler_FirstMessageMustBeAuth(t *testing.T) {
+	server, _ := setupWSTestServer(t)
+	conn := dialWS(t, server, "/games/game-1/ws", "")
+
+	if err := conn.WriteJSON(map[string]interface{}{
+		"type":           "MOVE",
+		"move_type":      "pass",
+		"payload":        nil,
+		"client_version": 1,
+	}); err != nil {
+		t.Fatalf("failed to write non-auth first message: %v", err)
+	}
+
+	msg := conn.ReadText(t)
+	if msg.Type != "ERROR" || !strings.Contains(msg.Error, "expected AUTH message") {
 		t.Fatalf("unexpected ws error response: %+v", msg)
 	}
 }
