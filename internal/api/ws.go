@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -70,7 +71,8 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, authMessage, err := conn.ReadMessage()
 	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
 			sendError("auth timed out")
 		} else {
 			sendError("failed to read auth message")

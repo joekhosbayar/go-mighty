@@ -193,7 +193,7 @@ func dialWS(t *testing.T, server *httptest.Server, path string, token string) *w
 		t.Fatalf("websocket dial failed: %v", err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	
+
 	if token != "" {
 		authMsg := map[string]string{
 			"type":  "AUTH",
@@ -203,7 +203,7 @@ func dialWS(t *testing.T, server *httptest.Server, path string, token string) *w
 			t.Fatalf("failed to send auth message: %v", err)
 		}
 	}
-	
+
 	return &websocketConn{Conn: conn}
 }
 
