@@ -31,13 +31,9 @@ A high-performance, real-time backend for the Mighty card game, built with Go, R
 
 ## 📡 WebSocket Handshake
 ```bash
-# Connect unauthenticated, then immediately send the AUTH frame
-curl --include \
-     --no-buffer \
-     --header "Connection: Upgrade" \
-     --header "Upgrade: websocket" \
-     --header "Host: localhost:8080" \
-     "http://localhost:8080/games/{id}/ws"
+# Connect and send AUTH as the first message within 5 seconds
+wscat -c "ws://localhost:8080/games/{id}/ws"
+# (alternative) websocat ws://localhost:8080/games/{id}/ws
 ```
 Once connected, send the authentication payload within 5 seconds:
 ```json

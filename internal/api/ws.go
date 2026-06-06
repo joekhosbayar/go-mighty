@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -69,6 +70,11 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, authMessage, err := conn.ReadMessage()
 	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			sendError("auth timed out")
+		} else {
+			sendError("failed to read auth message")
+		}
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to read auth message or timed out")
 		return
 	}

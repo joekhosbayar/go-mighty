@@ -222,6 +222,25 @@ func TestWSHandler_InvalidJSONReturnsErrorFrame(t *testing.T) {
 	}
 }
 
+func TestWSHandler_FirstMessageMustBeAuth(t *testing.T) {
+	server, _ := setupWSTestServer(t)
+	conn := dialWS(t, server, "/games/game-1/ws", "")
+
+	if err := conn.WriteJSON(map[string]interface{}{
+		"type":           "MOVE",
+		"move_type":      "pass",
+		"payload":        nil,
+		"client_version": 1,
+	}); err != nil {
+		t.Fatalf("failed to write non-auth first message: %v", err)
+	}
+
+	msg := conn.ReadText(t)
+	if msg.Type != "ERROR" || !strings.Contains(msg.Error, "expected AUTH message") {
+		t.Fatalf("unexpected ws error response: %+v", msg)
+	}
+}
+
 func TestWSHandler_InvalidMovePayloadReturnsErrorFrame(t *testing.T) {
 	server, _ := setupWSTestServer(t)
 	token := generateValidToken("user-1", "alice")
