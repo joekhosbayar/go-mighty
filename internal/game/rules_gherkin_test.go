@@ -1,6 +1,7 @@
 package game
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,12 +10,13 @@ import (
 )
 
 type engineFeature struct {
-	game *Game
-	lastErr   error
+	game    *Game
+	lastErr error
 }
 
 func (e *engineFeature) fiveAuthenticatedPlayers(p1, p2, p3, p4, p5 string) error {
 	e.game = New("test-engine-game")
+
 	names := []string{p1, p2, p3, p4, p5}
 	for i, name := range names {
 		e.game.Players[i] = &Player{
@@ -23,25 +25,28 @@ func (e *engineFeature) fiveAuthenticatedPlayers(p1, p2, p3, p4, p5 string) erro
 			Seat: i,
 		}
 	}
+
 	return nil
 }
 
-func (e *engineFeature) createsAHighStakesGame(username, gameID string) error {
+func (e *engineFeature) createsAHighStakesGame(_, _ string) error {
 	// Handled in fiveAuthenticatedPlayers
 	return nil
 }
 
-func (e *engineFeature) joinTheGame(p1, p2, p3, p4, p5, gameID string) error {
+func (e *engineFeature) joinTheGame(_, _, _, _, _, _ string) error {
 	// Handled in fiveAuthenticatedPlayers
 	e.game.Status = PhaseBidding
 	return nil
 }
 
-func (e *engineFeature) winsAContract(username string, bidStr string) error {
-	var points int
-	var suit string
-	fmt.Sscanf(bidStr, "%d %s", &points, &suit)
-	
+func (e *engineFeature) winsAContract(_ string, bidStr string) error {
+	var (
+		points int
+		suit   string
+	)
+	_, _ = fmt.Sscanf(bidStr, "%d %s", &points, &suit)
+
 	e.game.Contract = &Bid{
 		Points: points,
 		Suit:   Suit(suit),
@@ -49,34 +54,39 @@ func (e *engineFeature) winsAContract(username string, bidStr string) error {
 	e.game.Trump = Suit(suit)
 	e.game.Declarer = 0 // Assume Alice is seat 0
 	e.game.Status = PhaseExchanging
+
 	return nil
 }
 
-func (e *engineFeature) discardsCards(username string, count int) error {
+func (e *engineFeature) discardsCards(_ string, _ int) error {
 	e.game.Status = PhaseCalling
 	return nil
 }
 
-func (e *engineFeature) callsTheAsTheFriend(username, cardStr string) error {
+func (e *engineFeature) callsTheAsTheFriend(_, _ string) error {
 	e.game.Status = PhasePlaying
 	// Add initial trick
 	e.game.Tricks = append(e.game.Tricks, Trick{Cards: []PlayedCard{}})
+
 	return nil
 }
 
-func (e *engineFeature) theGameStatusShouldBe(gameID, status string) error {
+func (e *engineFeature) theGameStatusShouldBe(_, status string) error {
 	if string(e.game.Status) != status {
 		return fmt.Errorf("expected status %s, got %s", status, e.game.Status)
 	}
+
 	return nil
 }
 
 func (e *engineFeature) itIsTrick(trickNum int) error {
 	e.game.Tricks = make([]Trick, trickNum)
-	for i := 0; i < trickNum-1; i++ {
+	for i := range trickNum - 1 {
 		e.game.Tricks[i] = Trick{Winner: 0, Cards: make([]PlayedCard, 5)}
 	}
+
 	e.game.Tricks[trickNum-1] = Trick{Cards: []PlayedCard{}}
+
 	return nil
 }
 
@@ -96,18 +106,20 @@ func (e *engineFeature) playsThe(username, cardStr string) error {
 	if !p.HasCard(card) {
 		p.Hand = append(p.Hand, card)
 	}
-	
+
 	e.lastErr = e.game.ValidateMove(p.ID, MovePlayCard, PlayCardMove{Card: card})
 	if e.lastErr == nil {
-		e.game.ApplyMove(p.ID, MovePlayCard, PlayCardMove{Card: card})
+		_ = e.game.ApplyMove(p.ID, MovePlayCard, PlayCardMove{Card: card})
 	}
+
 	return nil
 }
 
-func (e *engineFeature) theShouldWinTheTrick(cardStr string) error {
+func (e *engineFeature) theShouldWinTheTrick(_ string) error {
 	// The current trick just finished or is in progress.
 	// Since we are unit testing ApplyMove, we need to check ResolveTrick results.
 	trickIdx := len(e.game.Tricks) - 1
+
 	t := e.game.Tricks[trickIdx]
 	if len(t.Cards) < 5 {
 		// Mock remaining players to finish trick
@@ -115,14 +127,14 @@ func (e *engineFeature) theShouldWinTheTrick(cardStr string) error {
 			t.Cards = append(t.Cards, PlayedCard{Card: Card{Suit: "none", Rank: "2"}})
 		}
 	}
-	
+
 	e.game.ResolveTrick(t)
 	// Find if the "winning card" is the one at the winning seat
 	// Simplified: Check if ResolveTrick correctly picks the highest power
 	return nil
 }
 
-func (e *engineFeature) shouldBeTheNextTurn(username string) error {
+func (e *engineFeature) shouldBeTheNextTurn(_ string) error {
 	// Check CurrentTurn seat matches username?
 	return nil
 }
@@ -135,29 +147,35 @@ func (e *engineFeature) hasThe(username, cardStr string) error {
 			if !p.HasCard(card) {
 				p.Hand = append(p.Hand, card)
 			}
+
 			break
 		}
 	}
+
 	return nil
 }
 
 func (e *engineFeature) leadsTheAndCallsOutTheJoker(username, cardStr string) error {
 	card := parseCard(cardStr)
+
 	p := e.game.Players[e.game.CurrentTurn]
 	if !p.HasCard(card) {
 		p.Hand = append(p.Hand, card)
 	}
-	
+
 	move := PlayCardMove{Card: card, CallJoker: true}
+
 	e.lastErr = e.game.ValidateMove(p.ID, MovePlayCard, move)
 	if e.lastErr == nil {
-		e.game.ApplyMove(p.ID, MovePlayCard, move)
+		_ = e.game.ApplyMove(p.ID, MovePlayCard, move)
 	}
+
 	return nil
 }
 
 func (e *engineFeature) shouldStillHaveTheInHand(username, cardStr string) error {
 	card := parseCard(cardStr)
+
 	for _, p := range e.game.Players {
 		if p.Name == username {
 			if !p.HasCard(card) {
@@ -165,18 +183,31 @@ func (e *engineFeature) shouldStillHaveTheInHand(username, cardStr string) error
 			}
 		}
 	}
+
 	return nil
 }
 
 func (e *engineFeature) hasTheAndLeadSuit(username, card1Str, card2Str string) error {
-	e.hasThe(username, card1Str)
-	e.hasThe(username, card2Str)
+	if err := e.hasThe(username, card1Str); err != nil {
+		return err
+	}
+
+	if err := e.hasThe(username, card2Str); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func (e *engineFeature) hasTheAndNonTrump(username, card1Str, card2Str string) error {
-	e.hasThe(username, card1Str)
-	e.hasThe(username, card2Str)
+	if err := e.hasThe(username, card1Str); err != nil {
+		return err
+	}
+
+	if err := e.hasThe(username, card2Str); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -190,11 +221,13 @@ func (e *engineFeature) attemptsToPlayThe(username, cardStr string) error {
 
 func (e *engineFeature) theMoveShouldBeRejectedAs(errMsg string) error {
 	if e.lastErr == nil {
-		return fmt.Errorf("expected error, but move was accepted")
+		return errors.New("expected error, but move was accepted")
 	}
+
 	if !strings.Contains(e.lastErr.Error(), errMsg) {
-		return fmt.Errorf("expected error containing %q, got: %v", errMsg, e.lastErr)
+		return fmt.Errorf("expected error containing %q, got: %w", errMsg, e.lastErr)
 	}
+
 	return nil
 }
 
@@ -203,16 +236,28 @@ func parseCard(s string) Card {
 	if s == "Joker" {
 		return Card{Suit: None, Rank: Joker}
 	}
+
 	parts := strings.Split(s, " of ")
 	rankStr := parts[0]
 	suitStr := strings.ToLower(parts[1])
-	
+
 	rank := Rank(rankStr)
-	if rankStr == "Ace" { rank = Ace }
-	if rankStr == "King" { rank = King }
-	if rankStr == "3" { rank = Three }
-	if rankStr == "2" { rank = Two }
-	
+	if rankStr == "Ace" {
+		rank = Ace
+	}
+
+	if rankStr == "King" {
+		rank = King
+	}
+
+	if rankStr == "3" {
+		rank = Three
+	}
+
+	if rankStr == "2" {
+		rank = Two
+	}
+
 	return Card{Suit: Suit(suitStr), Rank: rank}
 }
 
@@ -226,7 +271,7 @@ func InitializeEngineScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^"([^"]*)" discards (\d+) cards$`, e.discardsCards)
 	ctx.Step(`^"([^"]*)" calls the "([^"]*)" as the friend$`, e.callsTheAsTheFriend)
 	ctx.Step(`^the game "([^"]*)" status should be "([^"]*)"$`, e.theGameStatusShouldBe)
-	
+
 	ctx.Step(`^it is Trick (\d+)$`, e.itIsTrick)
 	ctx.Step(`^the trump suit is "([^"]*)"$`, e.theTrumpSuitIs)
 	ctx.Step(`^"([^"]*)" leads the "([^"]*)"$`, e.leadsThe)
@@ -234,13 +279,13 @@ func InitializeEngineScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^"([^"]*)" plays the "([^"]*)" \(.*$`, e.playsThe)
 	ctx.Step(`^the "([^"]*)" should win the trick$`, e.theShouldWinTheTrick)
 	ctx.Step(`^"([^"]*)" should be the next turn$`, e.shouldBeTheNextTurn)
-	
+
 	ctx.Step(`^"([^"]*)" has the "([^"]*)"$`, e.hasThe)
 	ctx.Step(`^"([^"]*)" has both the "([^"]*)" and the "([^"]*)"$`, e.hasThe)
 	ctx.Step(`^"([^"]*)" has both the "([^"]*)" and the "([^"]*)" \(Mighty\)$`, e.hasThe)
 	ctx.Step(`^"([^"]*)" leads the "([^"]*)" and calls out the Joker$`, e.leadsTheAndCallsOutTheJoker)
 	ctx.Step(`^"([^"]*)" should still have the "([^"]*)" in hand$`, e.shouldStillHaveTheInHand)
-	
+
 	ctx.Step(`^"([^"]*)" has the "([^"]*)" \(Mighty\) and "([^"]*)" \(Lead Suit\)$`, e.hasTheAndLeadSuit)
 	ctx.Step(`^"([^"]*)" has the "([^"]*)" \(Trump\) and "([^"]*)" \(Non-Trump\)$`, e.hasTheAndNonTrump)
 	ctx.Step(`^"([^"]*)" attempts to lead the "([^"]*)"$`, e.attemptsToLeadThe)
@@ -249,6 +294,7 @@ func InitializeEngineScenario(ctx *godog.ScenarioContext) {
 }
 
 func TestEngineFeatures(t *testing.T) {
+	t.Parallel()
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeEngineScenario,
 		Options: &godog.Options{

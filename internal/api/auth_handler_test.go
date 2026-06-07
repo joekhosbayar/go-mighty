@@ -15,7 +15,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const (
+	keyUsername = "username"
+	keyPassword = "password"
+	keyEmail    = "email"
+)
+
 func setupAuthTestEnv(t *testing.T) (*Handler, sqlmock.Sqlmock, *sql.DB) {
+	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
@@ -30,8 +37,9 @@ func setupAuthTestEnv(t *testing.T) (*Handler, sqlmock.Sqlmock, *sql.DB) {
 }
 
 func TestSignupHandler_Success(t *testing.T) {
+	t.Parallel()
 	handler, mock, db := setupAuthTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mock.ExpectQuery(`SELECT id, username, password_hash, email, created_at, updated_at FROM users WHERE username = \$1`).
 		WithArgs("newuser").
@@ -50,14 +58,15 @@ func TestSignupHandler_Success(t *testing.T) {
 	mock.ExpectCommit()
 
 	payload := map[string]string{
-		"username": "newuser",
-		"password": "password123",
-		"email":    "new@example.com",
+		keyUsername: "newuser",
+		keyPassword: "password123",
+		keyEmail:    "new@example.com",
 	}
 	body, _ := json.Marshal(payload)
 
-	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/auth/signup", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+
 	rec := httptest.NewRecorder()
 
 	handler.SignupHandler(rec, req)
@@ -72,8 +81,9 @@ func TestSignupHandler_Success(t *testing.T) {
 }
 
 func TestSignupHandler_UserExists(t *testing.T) {
+	t.Parallel()
 	handler, mock, db := setupAuthTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	rows := sqlmock.NewRows([]string{"id", "username", "password_hash", "email", "created_at", "updated_at"}).
 		AddRow("1", "existinguser", "hash", "existing@example.com", time.Now(), time.Now())
@@ -83,14 +93,15 @@ func TestSignupHandler_UserExists(t *testing.T) {
 		WillReturnRows(rows)
 
 	payload := map[string]string{
-		"username": "existinguser",
-		"password": "password123",
-		"email":    "existing@example.com",
+		keyUsername: "existinguser",
+		keyPassword: "password123",
+		keyEmail:    "existing@example.com",
 	}
 	body, _ := json.Marshal(payload)
 
-	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/auth/signup", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+
 	rec := httptest.NewRecorder()
 
 	handler.SignupHandler(rec, req)
@@ -105,8 +116,9 @@ func TestSignupHandler_UserExists(t *testing.T) {
 }
 
 func TestLoginHandler_Success(t *testing.T) {
+	t.Parallel()
 	handler, mock, db := setupAuthTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
 
@@ -118,13 +130,14 @@ func TestLoginHandler_Success(t *testing.T) {
 		WillReturnRows(rows)
 
 	payload := map[string]string{
-		"username": "testuser",
-		"password": "password123",
+		keyUsername: "testuser",
+		keyPassword: "password123",
 	}
 	body, _ := json.Marshal(payload)
 
-	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/auth/login", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+
 	rec := httptest.NewRecorder()
 
 	handler.LoginHandler(rec, req)
@@ -148,8 +161,9 @@ func TestLoginHandler_Success(t *testing.T) {
 }
 
 func TestLoginHandler_InvalidCredentials(t *testing.T) {
+	t.Parallel()
 	handler, mock, db := setupAuthTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
 
@@ -161,13 +175,14 @@ func TestLoginHandler_InvalidCredentials(t *testing.T) {
 		WillReturnRows(rows)
 
 	payload := map[string]string{
-		"username": "testuser",
-		"password": "wrongpassword",
+		keyUsername: "testuser",
+		keyPassword: "wrongpassword",
 	}
 	body, _ := json.Marshal(payload)
 
-	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/auth/login", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+
 	rec := httptest.NewRecorder()
 
 	handler.LoginHandler(rec, req)

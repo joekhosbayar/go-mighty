@@ -1,43 +1,55 @@
+// Package game provides game state definitions and core mechanics for the Mighty card game.
 package game
 
 import "time"
 
-// Phase represents the current state of the game
+// Phase represents the current state of the game.
 type Phase string
 
 const (
-	PhaseWaiting    Phase = "waiting"
-	PhaseBidding    Phase = "bidding"
+	// PhaseWaiting indicates the game is waiting for players to join.
+	PhaseWaiting Phase = "waiting"
+	// PhaseBidding indicates players are currently bidding for the contract.
+	PhaseBidding Phase = "bidding"
+	// PhaseExchanging indicates the declarer is exchanging cards with the kitty.
 	PhaseExchanging Phase = "exchanging" // Declarer exchanges cards
-	PhaseCalling    Phase = "calling"    // Declarer calls partner
-	PhasePlaying    Phase = "playing"
-	PhaseFinished   Phase = "finished"
+	// PhaseCalling indicates the declarer is calling a partner.
+	PhaseCalling Phase = "calling" // Declarer calls partner
+	// PhasePlaying indicates the trick-taking phase is in progress.
+	PhasePlaying Phase = "playing"
+	// PhaseFinished indicates the game has concluded.
+	PhaseFinished Phase = "finished"
 )
 
-// MoveType represents the type of action a player performs
+// MoveType represents the type of action a player performs.
 type MoveType string
 
 const (
-	MoveBid         MoveType = "bid"
-	MovePass        MoveType = "pass"
-	MoveDiscard     MoveType = "discard"
+	// MoveBid represents a bidding action.
+	MoveBid MoveType = "bid"
+	// MovePass represents a passing action during bidding.
+	MovePass MoveType = "pass"
+	// MoveDiscard represents a card discard action by the declarer.
+	MoveDiscard MoveType = "discard"
+	// MoveCallPartner represents a partner calling action by the declarer.
 	MoveCallPartner MoveType = "call_partner"
-	MovePlayCard    MoveType = "play_card"
+	// MovePlayCard represents a card play action during the playing phase.
+	MovePlayCard MoveType = "play_card"
 )
 
-// PlayCardMove represents the payload for playing a card
+// PlayCardMove represents the payload for playing a card.
 type PlayCardMove struct {
 	Card      Card `json:"card"`
 	CallJoker bool `json:"call_joker"`
 }
 
-// Config holds configuration for the game
+// Config holds configuration for the game.
 type Config struct {
 	MaxPlayers   int `json:"max_players"`
 	WinningScore int `json:"winning_score"` // usually 3-10
 }
 
-// Player represents a participant in the game
+// Player represents a participant in the game.
 type Player struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -47,7 +59,7 @@ type Player struct {
 	IsConnected bool   `json:"is_connected"`
 }
 
-// Bid represents a player's bid
+// Bid represents a player's bid.
 type Bid struct {
 	PlayerID  string `json:"player_id"`
 	Points    int    `json:"points"`
@@ -55,7 +67,7 @@ type Bid struct {
 	IsNoTrump bool   `json:"is_no_trump"`
 }
 
-// Game represents the complete state of a single game
+// Game represents the complete state of a single game.
 type Game struct {
 	ID      string     `json:"id"`
 	Status  Phase      `json:"status"`
@@ -93,7 +105,7 @@ type Game struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Trick represents a single round of 5 cards
+// Trick represents a single round of 5 cards.
 type Trick struct {
 	Cards       []PlayedCard `json:"cards"`
 	LeadSuit    Suit         `json:"lead_suit"`
@@ -101,13 +113,14 @@ type Trick struct {
 	JokerCalled bool         `json:"joker_called"` // If Joker Caller led and called Joker
 }
 
+// PlayedCard represents a card that has been played by a player during a trick.
 type PlayedCard struct {
 	PlayerID string `json:"player_id"`
 	Seat     int    `json:"seat"`
 	Card     Card   `json:"card"`
 }
 
-// New creates a new game instance
+// New creates a new game instance.
 func New(id string) *Game {
 	g := &Game{
 		ID:            id,
@@ -122,21 +135,24 @@ func New(id string) *Game {
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
+
 	return g
 }
 
-// IsFull checks if the game has 5 players
+// IsFull checks if the game has 5 players.
 func (g *Game) IsFull() bool {
 	count := 0
+
 	for _, p := range g.Players {
 		if p != nil {
 			count++
 		}
 	}
+
 	return count == 5
 }
 
-// Start deals the cards and starts the bidding phase
+// Start deals the cards and starts the bidding phase.
 func (g *Game) Start() {
 	deck := NewDeck()
 	deck.Shuffle()
@@ -148,6 +164,7 @@ func (g *Game) Start() {
 			g.Players[i].Points = []Card{}
 		}
 	}
+
 	g.Kitty = kitty
 	g.Status = PhaseBidding
 

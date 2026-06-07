@@ -14,37 +14,39 @@ type fakeRedisStore struct {
 	saved bool
 }
 
-func (f *fakeRedisStore) SaveGame(ctx context.Context, g *game.Game) error {
+func (f *fakeRedisStore) SaveGame(_ context.Context, g *game.Game) error {
 	f.saved = true
 	f.game = g
+
 	return nil
 }
 
-func (f *fakeRedisStore) LoadGame(ctx context.Context, gameID string) (*game.Game, error) {
+func (f *fakeRedisStore) LoadGame(_ context.Context, _ string) (*game.Game, error) {
 	return f.game, nil
 }
 
-func (f *fakeRedisStore) AcquireLock(ctx context.Context, gameID string) (bool, error) {
+func (f *fakeRedisStore) AcquireLock(_ context.Context, _ string) (bool, error) {
 	return true, nil
 }
 
-func (f *fakeRedisStore) ReleaseLock(ctx context.Context, gameID string) error {
+func (f *fakeRedisStore) ReleaseLock(_ context.Context, _ string) error {
 	return nil
 }
 
-func (f *fakeRedisStore) CheckVersion(ctx context.Context, gameID string, clientVersion int64) error {
+func (f *fakeRedisStore) CheckVersion(_ context.Context, _ string, _ int64) error {
 	return nil
 }
 
-func (f *fakeRedisStore) PublishEvent(ctx context.Context, gameID string, event interface{}) error {
+func (f *fakeRedisStore) PublishEvent(_ context.Context, _ string, _ any) error {
 	return nil
 }
 
-func (f *fakeRedisStore) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
+func (f *fakeRedisStore) Subscribe(_ context.Context, _ string) *redis.PubSub {
 	return nil
 }
 
 func TestJoinGameRejoinSameSeatRefreshesConnectionState(t *testing.T) {
+	t.Parallel()
 	g := game.New("game-1")
 	g.Players[0] = &game.Player{
 		ID:          "player-1",
@@ -57,9 +59,9 @@ func TestJoinGameRejoinSameSeatRefreshesConnectionState(t *testing.T) {
 	prevUpdatedAt := g.UpdatedAt
 
 	redisStore := &fakeRedisStore{game: g}
-	svc := &GameService{redisStore: redisStore}
+	svc := &Game{redisStore: redisStore}
 
-	updatedGame, err := svc.JoinGame(context.Background(), "game-1", "player-1", "New Name")
+	updatedGame, err := svc.JoinGame(t.Context(), "game-1", "player-1", "New Name")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -67,15 +69,19 @@ func TestJoinGameRejoinSameSeatRefreshesConnectionState(t *testing.T) {
 	if !redisStore.saved {
 		t.Fatalf("expected game to be persisted on rejoin")
 	}
+
 	if updatedGame.Players[0].Name != "New Name" {
 		t.Fatalf("expected player name to be refreshed, got %q", updatedGame.Players[0].Name)
 	}
+
 	if !updatedGame.Players[0].IsConnected {
 		t.Fatalf("expected player to be marked connected")
 	}
+
 	if updatedGame.Version != 4 {
 		t.Fatalf("expected version to increment to 4, got %d", updatedGame.Version)
 	}
+
 	if !updatedGame.UpdatedAt.After(prevUpdatedAt) {
 		t.Fatalf("expected updated_at to be refreshed")
 	}

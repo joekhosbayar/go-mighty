@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -18,20 +17,23 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// GameService defines the interface for game logic operations.
 type GameService interface {
 	CreateGame(ctx context.Context, id string) (*game.Game, error)
 	JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.Game, error)
-	ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.Game, error)
+	ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload any, clientVersion int64) (*game.Game, error)
 	Subscribe(ctx context.Context, gameID string) *redis.PubSub
 	GetGame(ctx context.Context, gameID string) (*game.Game, error)
 	ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.Game, error)
 }
 
+// Handler handles HTTP requests for the game API.
 type Handler struct {
 	svc     GameService
 	authSvc *service.Auth
 }
 
+// NewHandler creates a new Handler with the given services.
 func NewHandler(svc GameService, authSvc *service.Auth) *Handler {
 	return &Handler{
 		svc:     svc,
@@ -45,6 +47,7 @@ func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
 	}
 
 	tokenString := ""
+
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
 		parts := strings.Fields(authHeader)
@@ -60,13 +63,14 @@ func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
 	return h.authSvc.ValidateToken(tokenString)
 }
 
-// SignupHandler - POST /auth/signup
+// SignupHandler - POST /auth/signup.
 func (h *Handler) SignupHandler(w http.ResponseWriter, r *http.Request) {
 	type Request struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 		Email    string `json:"email"`
 	}
+
 	var req Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -79,13 +83,15 @@ func (h *Handler) SignupHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(struct {
+	_ = json.NewEncoder(w).Encode(struct {
 		ID        string    `json:"id"`
 		Username  string    `json:"username"`
 		Email     string    `json:"email"`
@@ -100,12 +106,13 @@ func (h *Handler) SignupHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// LoginHandler - POST /auth/login
+// LoginHandler - POST /auth/login.
 func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	type Request struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
+
 	var req Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -118,15 +125,17 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": token})
+	_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
-// CreateGameHandler - POST /games
+// CreateGameHandler - POST /games.
 func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
@@ -148,14 +157,15 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Error().Str("game_id", g.ID).Str("user_id", claims.UserID).Err(err).Msg("Failed to auto-join creator")
 		http.Error(w, "failed to auto-join creator", http.StatusInternalServerError)
+
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updatedState)
+	_ = json.NewEncoder(w).Encode(updatedState)
 }
 
-// JoinGameHandler - POST /games/{id}/join
+// JoinGameHandler - POST /games/{id}/join.
 func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
@@ -171,19 +181,22 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
+
 		if errors.Is(err, service.ErrGameFull) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(g)
+	_ = json.NewEncoder(w).Encode(g)
 }
 
-// MoveHandler - POST /games/{id}/move
+// MoveHandler - POST /games/{id}/move.
 func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
@@ -196,14 +209,16 @@ func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
 	type Request struct {
 		PlayerID      string        `json:"player_id"`
 		MoveType      game.MoveType `json:"move_type"`
-		Payload       interface{}   `json:"payload"`
+		Payload       any           `json:"payload"`
 		ClientVersion int64         `json:"client_version"`
 	}
+
 	var req Request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	req.PlayerID = claims.UserID
 
 	convertedPayload, err := ConvertPayload(req.MoveType, req.Payload)
@@ -219,11 +234,11 @@ func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(g)
+	_ = json.NewEncoder(w).Encode(g)
 }
 
-// ConvertPayload converts generic map/interface to concrete struct
-func ConvertPayload(moveType game.MoveType, payload interface{}) (interface{}, error) {
+// ConvertPayload converts generic map/interface to concrete struct.
+func ConvertPayload(moveType game.MoveType, payload any) (any, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -235,18 +250,21 @@ func ConvertPayload(moveType game.MoveType, payload interface{}) (interface{}, e
 		if err := json.Unmarshal(data, &lastBid); err != nil {
 			return nil, err
 		}
+
 		return lastBid, nil
 	case game.MoveDiscard:
 		var cards []game.Card
 		if err := json.Unmarshal(data, &cards); err != nil {
 			return nil, err
 		}
+
 		return cards, nil
 	case game.MoveCallPartner:
 		var card game.Card
 		if err := json.Unmarshal(data, &card); err != nil {
 			return nil, err
 		}
+
 		return card, nil
 	case game.MovePlayCard:
 		// Attempt to unmarshal as PlayCardMove first
@@ -259,7 +277,8 @@ func ConvertPayload(moveType game.MoveType, payload interface{}) (interface{}, e
 		if err := json.Unmarshal(data, &card); err == nil && card.Rank != "" {
 			return game.PlayCardMove{Card: card}, nil
 		}
-		return nil, fmt.Errorf("invalid play card payload: expected card or play_card_move object")
+
+		return nil, errors.New("invalid play card payload: expected card or play_card_move object")
 	case game.MovePass:
 		return nil, nil // No payload needed for pass usually, or ignored
 	default:
@@ -267,23 +286,27 @@ func ConvertPayload(moveType game.MoveType, payload interface{}) (interface{}, e
 	}
 }
 
-// GetGameHandler - GET /games/{id}
+// GetGameHandler - GET /games/{id}.
 func (h *Handler) GetGameHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
+
 	g, err := h.svc.GetGame(r.Context(), gameID)
 	if err != nil {
 		if errors.Is(err, service.ErrRedisStoreNotInitialized) {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+
 		http.Error(w, err.Error(), http.StatusNotFound)
+
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(g)
+	_ = json.NewEncoder(w).Encode(g)
 }
 
-// ListGamesHandler - GET /games
+// ListGamesHandler - GET /games.
 func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 	// Query param 'status' (e.g. ?status=waiting)
 	statusParam := r.URL.Query().Get("status")
@@ -305,7 +328,9 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
@@ -315,9 +340,10 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(games)
+	_ = json.NewEncoder(w).Encode(games)
 }
 
+// LoggingMiddleware logs the incoming HTTP requests and their responses.
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		log.Info().
@@ -340,15 +366,17 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 		event := log.Info()
 		msg := "Success response"
-		if statusCode >= 400 && statusCode < 500 {
-			event = log.Warn()
-			msg = "4xx response"
-		} else if statusCode >= 500 {
+
+		switch {
+		case statusCode >= 500:
 			event = log.Error()
 			msg = "5xx response"
-		} else if statusCode >= 300 && statusCode < 400 {
+		case statusCode >= 400:
+			event = log.Warn()
+			msg = "4xx response"
+		case statusCode >= 300:
 			msg = "3xx redirection response"
-		} else if statusCode >= 100 && statusCode < 200 {
+		case statusCode >= 100 && statusCode < 200:
 			msg = "1xx informational response"
 		}
 
@@ -362,12 +390,14 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// LoggingResponseWriter is a wrapper around http.ResponseWriter that captures the status code.
 type LoggingResponseWriter struct {
 	http.ResponseWriter
 	responseCode int
 	wroteHeader  bool
 }
 
+// WriteHeader captures the status code and calls the underlying ResponseWriter's WriteHeader.
 func (lrw *LoggingResponseWriter) WriteHeader(code int) {
 	if !lrw.wroteHeader {
 		lrw.responseCode = code
@@ -380,6 +410,7 @@ func (lrw *LoggingResponseWriter) Write(b []byte) (int, error) {
 	if !lrw.wroteHeader {
 		lrw.WriteHeader(http.StatusOK)
 	}
+
 	return lrw.ResponseWriter.Write(b)
 }
 
@@ -389,5 +420,6 @@ func (lrw *LoggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) 
 	if !ok {
 		return nil, nil, errors.New("hijack not supported")
 	}
+
 	return h.Hijack()
 }

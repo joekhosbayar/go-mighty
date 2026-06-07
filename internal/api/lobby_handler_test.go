@@ -20,37 +20,47 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	testGameID = "game-123"
+)
+
 type fakeRedisStore struct {
 	mu    sync.RWMutex
 	games map[string]*game.Game
 }
 
-func (f *fakeRedisStore) SaveGame(ctx context.Context, g *game.Game) error { return nil }
-func (f *fakeRedisStore) LoadGame(ctx context.Context, gameID string) (*game.Game, error) {
+func (f *fakeRedisStore) SaveGame(_ context.Context, _ *game.Game) error { return nil }
+func (f *fakeRedisStore) LoadGame(_ context.Context, gameID string) (*game.Game, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+
 	if g, ok := f.games[gameID]; ok {
 		return g, nil
 	}
+
 	return nil, nil
 }
-func (f *fakeRedisStore) AcquireLock(ctx context.Context, gameID string) (bool, error) {
+
+func (f *fakeRedisStore) AcquireLock(_ context.Context, _ string) (bool, error) {
 	return true, nil
 }
-func (f *fakeRedisStore) ReleaseLock(ctx context.Context, gameID string) error { return nil }
-func (f *fakeRedisStore) CheckVersion(ctx context.Context, gameID string, clientVersion int64) error {
+func (f *fakeRedisStore) ReleaseLock(_ context.Context, _ string) error { return nil }
+func (f *fakeRedisStore) CheckVersion(_ context.Context, _ string, _ int64) error {
 	return nil
 }
-func (f *fakeRedisStore) PublishEvent(ctx context.Context, gameID string, event interface{}) error {
+
+func (f *fakeRedisStore) PublishEvent(_ context.Context, _ string, _ any) error {
 	return nil
 }
-func (f *fakeRedisStore) Subscribe(ctx context.Context, gameID string) *redis.PubSub { return nil }
+func (f *fakeRedisStore) Subscribe(_ context.Context, _ string) *redis.PubSub { return nil }
 
 func setupLobbyTestEnv(t *testing.T) (*Handler, sqlmock.Sqlmock, *sql.DB) {
+	t.Helper()
 	return setupLobbyTestEnvWithRedis(t, &fakeRedisStore{games: map[string]*game.Game{}})
 }
 
 func setupLobbyTestEnvWithRedis(t *testing.T, redisStore service.RedisStore) (*Handler, sqlmock.Sqlmock, *sql.DB) {
+	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
@@ -75,29 +85,32 @@ func generateValidToken(userID, username string) string {
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signedToken, _ := token.SignedString([]byte("testsecret"))
+
 	return signedToken
 }
 
 func TestListGamesHandler_Success(t *testing.T) {
+	t.Parallel()
 	redisStore := &fakeRedisStore{
 		games: map[string]*game.Game{
-			"game-123": {ID: "game-123", Status: game.PhaseWaiting},
+			testGameID: {ID: testGameID, Status: game.PhaseWaiting},
 			"game-456": {ID: "game-456", Status: game.PhaseWaiting},
 		},
 	}
+
 	handler, mock, db := setupLobbyTestEnvWithRedis(t, redisStore)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Mock the postgres query for waiting games
 	rows := sqlmock.NewRows([]string{"id"}).
-		AddRow("game-123").
+		AddRow(testGameID).
 		AddRow("game-456")
 
 	mock.ExpectQuery(`SELECT id FROM games WHERE status = \$1 ORDER BY created_at DESC LIMIT 50`).
 		WithArgs("waiting").
 		WillReturnRows(rows)
 
-	req := httptest.NewRequest(http.MethodGet, "/games?status=waiting", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games?status=waiting", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ListGamesHandler(rec, req)
@@ -114,7 +127,8 @@ func TestListGamesHandler_Success(t *testing.T) {
 	if len(resp) != 2 {
 		t.Fatalf("expected 2 games, got %d", len(resp))
 	}
-	if resp[0].ID != "game-123" || resp[1].ID != "game-456" {
+
+	if resp[0].ID != testGameID || resp[1].ID != "game-456" {
 		t.Fatalf("unexpected game ids in response: %+v", resp)
 	}
 
@@ -124,16 +138,18 @@ func TestListGamesHandler_Success(t *testing.T) {
 }
 
 func TestJoinGameHandler_Unauthorized_NoToken(t *testing.T) {
+	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"seat": 0,
 	}
 	body, _ := json.Marshal(payload)
 
-	req := httptest.NewRequest(http.MethodPost, "/games/game-123/join", bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/join", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+
 	rec := httptest.NewRecorder()
 
 	handler.JoinGameHandler(rec, req)
@@ -144,10 +160,11 @@ func TestJoinGameHandler_Unauthorized_NoToken(t *testing.T) {
 }
 
 func TestListGamesHandler_InvalidStatus(t *testing.T) {
+	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
-	req := httptest.NewRequest(http.MethodGet, "/games?status=unknown", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games?status=unknown", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ListGamesHandler(rec, req)
@@ -158,17 +175,19 @@ func TestListGamesHandler_InvalidStatus(t *testing.T) {
 }
 
 func TestJoinGameHandler_Unauthorized_InvalidToken(t *testing.T) {
+	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"seat": 0,
 	}
 	body, _ := json.Marshal(payload)
 
-	req := httptest.NewRequest(http.MethodPost, "/games/game-123/join", bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/join", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer invalid.token.string")
+
 	rec := httptest.NewRecorder()
 
 	handler.JoinGameHandler(rec, req)
@@ -179,17 +198,19 @@ func TestJoinGameHandler_Unauthorized_InvalidToken(t *testing.T) {
 }
 
 func TestJoinGameHandler_Unauthorized_QueryToken(t *testing.T) {
+	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"seat": 0,
 	}
 	body, _ := json.Marshal(payload)
 
 	token := generateValidToken("player-1", "alice")
-	req := httptest.NewRequest(http.MethodPost, "/games/game-123/join?token="+token, bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/join?token="+token, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
+
 	rec := httptest.NewRecorder()
 
 	handler.JoinGameHandler(rec, req)
@@ -200,13 +221,15 @@ func TestJoinGameHandler_Unauthorized_QueryToken(t *testing.T) {
 }
 
 func TestJoinGameHandler_GameNotFound(t *testing.T) {
+	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	token := generateValidToken("player-1", "alice")
-	req := httptest.NewRequest(http.MethodPost, "/games/missing/join", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/missing/join", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.SetPathValue("id", "missing")
+
 	rec := httptest.NewRecorder()
 
 	handler.JoinGameHandler(rec, req)
@@ -217,23 +240,26 @@ func TestJoinGameHandler_GameNotFound(t *testing.T) {
 }
 
 func TestJoinGameHandler_GameFull(t *testing.T) {
-	fullGame := game.NewGame("game-123")
-	for i := 0; i < len(fullGame.Players); i++ {
+	t.Parallel()
+	fullGame := game.New(testGameID)
+	for i := range len(fullGame.Players) {
 		fullGame.Players[i] = &game.Player{ID: fmt.Sprintf("player-%d", i+1), Name: "player", Seat: i}
 	}
 
 	redisStore := &fakeRedisStore{
 		games: map[string]*game.Game{
-			"game-123": fullGame,
+			testGameID: fullGame,
 		},
 	}
+
 	handler, _, db := setupLobbyTestEnvWithRedis(t, redisStore)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	token := generateValidToken("player-new", "alice")
-	req := httptest.NewRequest(http.MethodPost, "/games/game-123/join", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/join", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.SetPathValue("id", "game-123")
+	req.SetPathValue("id", testGameID)
+
 	rec := httptest.NewRecorder()
 
 	handler.JoinGameHandler(rec, req)
@@ -244,13 +270,15 @@ func TestJoinGameHandler_GameFull(t *testing.T) {
 }
 
 func TestMoveHandler_Unauthorized_NoToken(t *testing.T) {
+	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	body := []byte(`{"player_id":"player-1","move_type":"pass","client_version":0,"payload":null}`)
-	req := httptest.NewRequest(http.MethodPost, "/games/game-123/move", bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/move", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.SetPathValue("id", "game-123")
+	req.SetPathValue("id", testGameID)
+
 	rec := httptest.NewRecorder()
 
 	handler.MoveHandler(rec, req)
@@ -261,14 +289,16 @@ func TestMoveHandler_Unauthorized_NoToken(t *testing.T) {
 }
 
 func TestMoveHandler_Unauthorized_InvalidToken(t *testing.T) {
+	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	body := []byte(`{"player_id":"player-1","move_type":"pass","client_version":0,"payload":null}`)
-	req := httptest.NewRequest(http.MethodPost, "/games/game-123/move", bytes.NewBuffer(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/move", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer invalid.token.string")
-	req.SetPathValue("id", "game-123")
+	req.SetPathValue("id", testGameID)
+
 	rec := httptest.NewRecorder()
 
 	handler.MoveHandler(rec, req)

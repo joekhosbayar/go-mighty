@@ -1,3 +1,5 @@
+// Package service provides the business logic for the Mighty application, including
+// authentication and game management services.
 package service
 
 import (
@@ -13,21 +15,26 @@ import (
 )
 
 var (
-	ErrUserAlreadyExists  = errors.New("user already exists")
+	// ErrUserAlreadyExists is returned when a user attempts to sign up with an existing username.
+	ErrUserAlreadyExists = errors.New("user already exists")
+	// ErrInvalidCredentials is returned when login fails due to incorrect username or password.
 	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
+// Auth provides authentication services, including signup, login, and token validation.
 type Auth struct {
 	store     *postgres.Store
 	jwtSecret []byte
 }
 
+// AuthClaims represents the custom JWT claims used for authentication.
 type AuthClaims struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
 	jwt.RegisteredClaims
 }
 
+// NewAuth creates and returns a new Auth service instance.
 func NewAuth(store *postgres.Store, jwtSecret string) *Auth {
 	return &Auth{
 		store:     store,
@@ -35,11 +42,13 @@ func NewAuth(store *postgres.Store, jwtSecret string) *Auth {
 	}
 }
 
+// Signup creates a new user account.
 func (s *Auth) Signup(ctx context.Context, username, password, email string) (*postgres.User, error) {
 	existing, err := s.store.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err
 	}
+
 	if existing != nil {
 		return nil, ErrUserAlreadyExists
 	}
@@ -63,17 +72,20 @@ func (s *Auth) Signup(ctx context.Context, username, password, email string) (*p
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
 			return nil, ErrUserAlreadyExists
 		}
+
 		return nil, err
 	}
 
 	return user, nil
 }
 
+// Login authenticates a user and returns a JWT token.
 func (s *Auth) Login(ctx context.Context, username, password string) (string, error) {
 	user, err := s.store.GetUserByUsername(ctx, username)
 	if err != nil {
 		return "", err
 	}
+
 	if user == nil {
 		return "", ErrInvalidCredentials
 	}
@@ -92,17 +104,19 @@ func (s *Auth) Login(ctx context.Context, username, password string) (string, er
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
 	return token.SignedString(s.jwtSecret)
 }
 
+// ValidateToken parses and validates a JWT token string.
 func (s *Auth) ValidateToken(tokenString string) (*AuthClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &AuthClaims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &AuthClaims{}, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, errors.New("unexpected signing method")
 		}
+
 		return s.jwtSecret, nil
 	})
-
 	if err != nil {
 		return nil, err
 	}

@@ -5,17 +5,19 @@ import (
 )
 
 func TestGameFlow(t *testing.T) {
+	t.Parallel()
 	// 1. Initialize Game
 	g := New("test-game")
 
 	// Add players
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		p := &Player{ID: string(rune('A' + i)), Seat: i, Name: string(rune('A' + i))}
 		g.Players[i] = p
 	}
 
 	// 2. Start (Deal)
 	g.Start()
+
 	if len(g.Players[0].Hand) != 10 {
 		t.Errorf("Expected 10 cards, got %d", len(g.Players[0].Hand))
 	}
@@ -26,7 +28,8 @@ func TestGameFlow(t *testing.T) {
 	if err != nil {
 		t.Errorf("Valid bid rejected: %v", err)
 	}
-	g.ApplyMove(g.Players[0].ID, MoveBid, Bid{Points: 7, Suit: Spades})
+
+	_ = g.ApplyMove(g.Players[0].ID, MoveBid, Bid{Points: 7, Suit: Spades})
 
 	if g.CurrentBid == nil || g.CurrentBid.Points != 7 {
 		t.Errorf("Bid not applied")
@@ -36,15 +39,17 @@ func TestGameFlow(t *testing.T) {
 	if g.CurrentTurn != 1 {
 		t.Errorf("Expected turn 1, got %d", g.CurrentTurn)
 	}
+
 	err = g.ValidateMove(g.Players[1].ID, MovePass, nil)
 	if err != nil {
 		t.Errorf("Valid pass rejected: %v", err)
 	}
-	g.ApplyMove(g.Players[1].ID, MovePass, nil)
+
+	_ = g.ApplyMove(g.Players[1].ID, MovePass, nil)
 
 	// Simulate others pass
-	g.ApplyMove(g.Players[2].ID, MovePass, nil)
-	g.ApplyMove(g.Players[3].ID, MovePass, nil)
+	_ = g.ApplyMove(g.Players[2].ID, MovePass, nil)
+	_ = g.ApplyMove(g.Players[3].ID, MovePass, nil)
 
 	// Player 4 attempts same-point lower-suit bid; should be rejected
 	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 7, Suit: Diamonds})
@@ -52,7 +57,7 @@ func TestGameFlow(t *testing.T) {
 		t.Errorf("Expected error for low bid")
 	}
 
-	g.ApplyMove(g.Players[4].ID, MovePass, nil)
+	_ = g.ApplyMove(g.Players[4].ID, MovePass, nil)
 
 	// Now Game should be in PhaseExchanging
 	if g.Status != PhaseExchanging {
@@ -71,6 +76,7 @@ func TestGameFlow(t *testing.T) {
 }
 
 func TestBeats(t *testing.T) {
+	t.Parallel()
 	g := New("test")
 	// Scenario: Trump is Hearts. So Spades Ace is Mighty.
 	g.Trump = Hearts
@@ -112,6 +118,7 @@ func TestBeats(t *testing.T) {
 }
 
 func TestJokerExceptions(t *testing.T) {
+	t.Parallel()
 	g := New("test-joker")
 	g.Trump = Hearts
 	joker := Card{Suit: None, Rank: Joker}
@@ -119,6 +126,7 @@ func TestJokerExceptions(t *testing.T) {
 
 	// Trick 1: Joker has 0 power
 	g.Tricks = []Trick{{}} // One trick active (Trick 1)
+
 	t1 := Trick{LeadSuit: Clubs}
 	if g.Beats(joker, clubA, t1) {
 		t.Errorf("Joker should lose on trick 1")
@@ -126,6 +134,7 @@ func TestJokerExceptions(t *testing.T) {
 
 	// Trick 10: Joker has 0 power
 	g.Tricks = make([]Trick, 10)
+
 	t10 := Trick{LeadSuit: Clubs}
 	if g.Beats(joker, clubA, t10) {
 		t.Errorf("Joker should lose on trick 10")
@@ -133,6 +142,7 @@ func TestJokerExceptions(t *testing.T) {
 
 	// Joker Called: Joker has 0 power
 	g.Tricks = make([]Trick, 5)
+
 	tCalled := Trick{LeadSuit: Clubs, JokerCalled: true}
 	if g.Beats(joker, clubA, tCalled) {
 		t.Errorf("Joker should lose when called")
@@ -140,6 +150,7 @@ func TestJokerExceptions(t *testing.T) {
 }
 
 func TestJokerCaller(t *testing.T) {
+	t.Parallel()
 	g := New("test-caller")
 	g.Trump = Hearts
 
@@ -151,6 +162,7 @@ func TestJokerCaller(t *testing.T) {
 
 	// Clubs Trump: Spades 3 is Joker Caller
 	g.Trump = Clubs
+
 	spades3 := Card{Suit: Spades, Rank: Three}
 	if !g.IsJokerCaller(spades3) {
 		t.Errorf("Spades 3 should be Joker Caller when Clubs is Trump")
@@ -158,6 +170,7 @@ func TestJokerCaller(t *testing.T) {
 }
 
 func TestMightyIdentity(t *testing.T) {
+	t.Parallel()
 	g := New("test-mighty")
 
 	// Hearts Trump: Spades Ace is Mighty
@@ -174,6 +187,7 @@ func TestMightyIdentity(t *testing.T) {
 }
 
 func TestFirstTrickTrumpLead(t *testing.T) {
+	t.Parallel()
 	g := New("test-first-lead")
 	g.Players[0] = &Player{ID: "P1", Seat: 0, Hand: []Card{
 		{Suit: Hearts, Rank: Ace}, // Trump
@@ -185,6 +199,7 @@ func TestFirstTrickTrumpLead(t *testing.T) {
 
 	// Leading trump on trick 1 with non-trump in hand -> Error
 	move := PlayCardMove{Card: Card{Suit: Hearts, Rank: Ace}}
+
 	err := g.ValidateMove("P1", MovePlayCard, move)
 	if err == nil {
 		t.Errorf("Should reject trump lead on trick 1")
@@ -192,6 +207,7 @@ func TestFirstTrickTrumpLead(t *testing.T) {
 
 	// Leading non-trump -> OK
 	move2 := PlayCardMove{Card: Card{Suit: Clubs, Rank: Two}}
+
 	err = g.ValidateMove("P1", MovePlayCard, move2)
 	if err != nil {
 		t.Errorf("Should accept non-trump lead on trick 1: %v", err)
@@ -199,6 +215,7 @@ func TestFirstTrickTrumpLead(t *testing.T) {
 }
 
 func TestJokerCallerForce(t *testing.T) {
+	t.Parallel()
 	g := New("test-force")
 	g.Players[1] = &Player{ID: "P2", Seat: 1, Hand: []Card{
 		{Suit: None, Rank: Joker},
@@ -216,12 +233,14 @@ func TestJokerCallerForce(t *testing.T) {
 
 	// Must play Joker
 	move := PlayCardMove{Card: Card{Suit: Hearts, Rank: Two}}
+
 	err := g.ValidateMove("P2", MovePlayCard, move)
 	if err == nil {
 		t.Errorf("Should force Joker play")
 	}
 
 	move2 := PlayCardMove{Card: Card{Suit: None, Rank: Joker}}
+
 	err = g.ValidateMove("P2", MovePlayCard, move2)
 	if err != nil {
 		t.Errorf("Should allow forced Joker play: %v", err)
@@ -229,6 +248,7 @@ func TestJokerCallerForce(t *testing.T) {
 }
 
 func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
+	t.Parallel()
 	g := New("test-first-trick-mighty")
 	g.Status = PhasePlaying
 	g.Trump = Hearts // Mighty is Ace of Spades
@@ -247,6 +267,7 @@ func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
 		{Suit: Spades, Rank: Ace}, // Mighty
 		{Suit: Hearts, Rank: Two}, // Can follow suit
 	}
+
 	err := g.ValidateMove("P2", MovePlayCard, PlayCardMove{Card: Card{Suit: Spades, Rank: Ace}})
 	if err == nil {
 		t.Fatalf("expected first-trick mighty rejection when player can follow suit")
@@ -257,6 +278,7 @@ func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
 		{Suit: Spades, Rank: Ace}, // Mighty
 		{Suit: Clubs, Rank: Two},
 	}
+
 	err = g.ValidateMove("P2", MovePlayCard, PlayCardMove{Card: Card{Suit: Spades, Rank: Ace}})
 	if err != nil {
 		t.Fatalf("expected mighty to be allowed when player cannot follow suit: %v", err)
@@ -264,17 +286,18 @@ func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
 }
 
 func TestScoring(t *testing.T) {
+	t.Parallel()
 	g := New("test-scoring")
 	g.Declarer = 0
 	g.PartnerSeat = 1
 	g.Contract = &Bid{Points: 7, Suit: Spades, IsNoTrump: false}
 
 	// Simulate 8 tricks won by team (Declarer + Partner)
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		g.Tricks = append(g.Tricks, Trick{Winner: 0})
 	}
 	// 2 tricks won by opponents
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		g.Tricks = append(g.Tricks, Trick{Winner: 2})
 	}
 
@@ -283,12 +306,14 @@ func TestScoring(t *testing.T) {
 	if score != 75 {
 		t.Errorf("Expected score 75, got %v", score)
 	}
+
 	if friendScore != 37.5 {
 		t.Errorf("Expected friend score 37.5, got %v", friendScore)
 	}
 
 	// Test No-Trump Multiplier
 	g.Contract.IsNoTrump = true
+
 	score, _ = g.CalculateFinalScore()
 	if score != 150 { // 75 * 2
 		t.Errorf("Expected No-Trump score 150, got %v", score)
@@ -297,10 +322,12 @@ func TestScoring(t *testing.T) {
 	// Test No-Friend Multiplier
 	g.IsNoFriend = true
 	g.PartnerSeat = -1
+
 	score, friendScore = g.CalculateFinalScore()
 	if score != 300 { // 150 * 2
 		t.Errorf("Expected No-Friend score 300, got %v", score)
 	}
+
 	if friendScore != 0 {
 		t.Errorf("Expected friend score 0 for No-Friend game")
 	}
@@ -309,7 +336,7 @@ func TestScoring(t *testing.T) {
 	g.Contract.Points = 10
 	// Recalculate tricks won (all 10 now for 10-bid)
 	g.Tricks = nil
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		g.Tricks = append(g.Tricks, Trick{Winner: 0})
 	}
 	// 10-bid, 10 tricks, NT, NoFriend -> (10*10)*2*2*2 = 800
@@ -320,6 +347,7 @@ func TestScoring(t *testing.T) {
 }
 
 func TestValidateBid_NoTrumpAndSuitValidation(t *testing.T) {
+	t.Parallel()
 	g := New("test-bid-validation")
 	g.Status = PhaseBidding
 	g.CurrentTurn = 0
