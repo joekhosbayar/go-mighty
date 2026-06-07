@@ -303,7 +303,7 @@ func TestWSHandler_ValidMoveCallsProcessMoveAndForwardsEvent(t *testing.T) {
 	}
 
 	msg := conn.ReadRawText(t)
-	if !strings.Contains(msg, `keyType:"move"`) {
+	if !strings.Contains(msg, `"type":"move"`) {
 		t.Fatalf("expected forwarded move event, got: %s", msg)
 	}
 }

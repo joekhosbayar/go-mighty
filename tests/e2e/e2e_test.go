@@ -1,3 +1,5 @@
+//go:build integration
+
 package e2e
 
 import (
@@ -6,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,7 +31,7 @@ type apiFeature struct {
 	runID        string
 }
 
-var userCounter int
+var userCounter atomic.Int32
 
 func (a *apiFeature) theGameServerIsRunning() error {
 	var err error
@@ -48,8 +52,8 @@ func (a *apiFeature) getUniqueUsername(username string) string {
 		return name
 	}
 
-	userCounter++
-	unique := fmt.Sprintf("%s_%s_%d", username, a.runID, userCounter)
+	count := userCounter.Add(1)
+	unique := fmt.Sprintf("%s_%s_%d", username, a.runID, count)
 	a.realNames[username] = unique
 
 	return unique
@@ -323,7 +327,12 @@ func (a *apiFeature) playOutGame() error {
 }
 
 func InitializeScenario(ctx *godog.ScenarioContext) {
-	api := &apiFeature{client: resty.New().SetBaseURL("http://localhost:8080")}
+	baseURL := os.Getenv("E2E_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+
+	api := &apiFeature{client: resty.New().SetBaseURL(baseURL)}
 
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		api.tokens = make(map[string]string)
