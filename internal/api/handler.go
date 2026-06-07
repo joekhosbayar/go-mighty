@@ -19,20 +19,20 @@ import (
 )
 
 type GameService interface {
-	CreateGame(ctx context.Context, id string) (*game.GameState, error)
-	JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.GameState, error)
-	ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.GameState, error)
+	CreateGame(ctx context.Context, id string) (*game.Game, error)
+	JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.Game, error)
+	ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.Game, error)
 	Subscribe(ctx context.Context, gameID string) *redis.PubSub
-	GetGame(ctx context.Context, gameID string) (*game.GameState, error)
-	ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error)
+	GetGame(ctx context.Context, gameID string) (*game.Game, error)
+	ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.Game, error)
 }
 
 type Handler struct {
 	svc     GameService
-	authSvc *service.AuthService
+	authSvc *service.Auth
 }
 
-func NewHandler(svc GameService, authSvc *service.AuthService) *Handler {
+func NewHandler(svc GameService, authSvc *service.Auth) *Handler {
 	return &Handler{
 		svc:     svc,
 		authSvc: authSvc,
@@ -311,7 +311,7 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Make sure we return an empty array instead of null if no games are found
 	if games == nil {
-		games = []*game.GameState{}
+		games = []*game.Game{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

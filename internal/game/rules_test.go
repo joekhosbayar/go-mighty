@@ -6,7 +6,7 @@ import (
 
 func TestGameFlow(t *testing.T) {
 	// 1. Initialize Game
-	g := NewGame("test-game")
+	g := New("test-game")
 
 	// Add players
 	for i := 0; i < 5; i++ {
@@ -71,7 +71,7 @@ func TestGameFlow(t *testing.T) {
 }
 
 func TestBeats(t *testing.T) {
-	g := NewGame("test")
+	g := New("test")
 	// Scenario: Trump is Hearts. So Spades Ace is Mighty.
 	g.Trump = Hearts
 	// Simulate middle trick
@@ -112,7 +112,7 @@ func TestBeats(t *testing.T) {
 }
 
 func TestJokerExceptions(t *testing.T) {
-	g := NewGame("test-joker")
+	g := New("test-joker")
 	g.Trump = Hearts
 	joker := Card{Suit: None, Rank: Joker}
 	clubA := Card{Suit: Clubs, Rank: Ace}
@@ -140,7 +140,7 @@ func TestJokerExceptions(t *testing.T) {
 }
 
 func TestJokerCaller(t *testing.T) {
-	g := NewGame("test-caller")
+	g := New("test-caller")
 	g.Trump = Hearts
 
 	// Standard: Clubs 3 is Joker Caller
@@ -158,7 +158,7 @@ func TestJokerCaller(t *testing.T) {
 }
 
 func TestMightyIdentity(t *testing.T) {
-	g := NewGame("test-mighty")
+	g := New("test-mighty")
 
 	// Hearts Trump: Spades Ace is Mighty
 	g.Trump = Hearts
@@ -174,7 +174,7 @@ func TestMightyIdentity(t *testing.T) {
 }
 
 func TestFirstTrickTrumpLead(t *testing.T) {
-	g := NewGame("test-first-lead")
+	g := New("test-first-lead")
 	g.Players[0] = &Player{ID: "P1", Seat: 0, Hand: []Card{
 		{Suit: Hearts, Rank: Ace}, // Trump
 		{Suit: Clubs, Rank: Two},  // Non-trump
@@ -199,7 +199,7 @@ func TestFirstTrickTrumpLead(t *testing.T) {
 }
 
 func TestJokerCallerForce(t *testing.T) {
-	g := NewGame("test-force")
+	g := New("test-force")
 	g.Players[1] = &Player{ID: "P2", Seat: 1, Hand: []Card{
 		{Suit: None, Rank: Joker},
 		{Suit: Hearts, Rank: Two},
@@ -229,7 +229,7 @@ func TestJokerCallerForce(t *testing.T) {
 }
 
 func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
-	g := NewGame("test-first-trick-mighty")
+	g := New("test-first-trick-mighty")
 	g.Status = PhasePlaying
 	g.Trump = Hearts // Mighty is Ace of Spades
 	g.CurrentTurn = 1
@@ -264,7 +264,7 @@ func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
 }
 
 func TestScoring(t *testing.T) {
-	g := NewGame("test-scoring")
+	g := New("test-scoring")
 	g.Declarer = 0
 	g.PartnerSeat = 1
 	g.Contract = &Bid{Points: 7, Suit: Spades, IsNoTrump: false}
@@ -320,7 +320,7 @@ func TestScoring(t *testing.T) {
 }
 
 func TestValidateBid_NoTrumpAndSuitValidation(t *testing.T) {
-	g := NewGame("test-bid-validation")
+	g := New("test-bid-validation")
 	g.Status = PhaseBidding
 	g.CurrentTurn = 0
 	g.Players[0] = &Player{ID: "P1", Seat: 0}

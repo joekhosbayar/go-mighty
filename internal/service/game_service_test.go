@@ -10,17 +10,17 @@ import (
 )
 
 type fakeRedisStore struct {
-	game  *game.GameState
+	game  *game.Game
 	saved bool
 }
 
-func (f *fakeRedisStore) SaveGame(ctx context.Context, g *game.GameState) error {
+func (f *fakeRedisStore) SaveGame(ctx context.Context, g *game.Game) error {
 	f.saved = true
 	f.game = g
 	return nil
 }
 
-func (f *fakeRedisStore) LoadGame(ctx context.Context, gameID string) (*game.GameState, error) {
+func (f *fakeRedisStore) LoadGame(ctx context.Context, gameID string) (*game.Game, error) {
 	return f.game, nil
 }
 
@@ -45,7 +45,7 @@ func (f *fakeRedisStore) Subscribe(ctx context.Context, gameID string) *redis.Pu
 }
 
 func TestJoinGameRejoinSameSeatRefreshesConnectionState(t *testing.T) {
-	g := game.NewGame("game-1")
+	g := game.New("game-1")
 	g.Players[0] = &game.Player{
 		ID:          "player-1",
 		Name:        "Old Name",

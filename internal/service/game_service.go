@@ -19,8 +19,8 @@ var (
 )
 
 type RedisStore interface {
-	SaveGame(ctx context.Context, g *game.GameState) error
-	LoadGame(ctx context.Context, gameID string) (*game.GameState, error)
+	SaveGame(ctx context.Context, g *game.Game) error
+	LoadGame(ctx context.Context, gameID string) (*game.Game, error)
 	AcquireLock(ctx context.Context, gameID string) (bool, error)
 	ReleaseLock(ctx context.Context, gameID string) error
 	CheckVersion(ctx context.Context, gameID string, clientVersion int64) error
@@ -28,21 +28,21 @@ type RedisStore interface {
 	Subscribe(ctx context.Context, gameID string) *redis.PubSub
 }
 
-type GameService struct {
+type Game struct {
 	redisStore    RedisStore
 	postgresStore *postgres.Store
 }
 
-func NewGameService(r RedisStore, p *postgres.Store) *GameService {
-	return &GameService{
+func NewGame(r RedisStore, p *postgres.Store) *Game {
+	return &Game{
 		redisStore:    r,
 		postgresStore: p,
 	}
 }
 
 // CreateGame initializes a new game
-func (s *GameService) CreateGame(ctx context.Context, id string) (*game.GameState, error) {
-	g := game.NewGame(id)
+func (s *Game) CreateGame(ctx context.Context, id string) (*game.Game, error) {
+	g := game.New(id)
 
 	// Save to Postgres (ledger)
 	if err := s.postgresStore.CreateGame(ctx, g); err != nil {
@@ -58,7 +58,7 @@ func (s *GameService) CreateGame(ctx context.Context, id string) (*game.GameStat
 }
 
 // JoinGame handles player joining
-func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.GameState, error) {
+func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.Game, error) {
 	// Lock
 	_, err := s.redisStore.AcquireLock(ctx, gameID)
 	if err != nil {
@@ -136,7 +136,7 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 }
 
 // ProcessMove handles game moves
-func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.GameState, error) {
+func (s *Game) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.Game, error) {
 	// 1. Lock
 	_, err := s.redisStore.AcquireLock(ctx, gameID)
 	if err != nil {
@@ -204,7 +204,7 @@ func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, 
 }
 
 // Subscribe returns a redis PubSub
-func (s *GameService) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
+func (s *Game) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
 	if s.redisStore == nil {
 		return nil
 	}
@@ -212,7 +212,7 @@ func (s *GameService) Subscribe(ctx context.Context, gameID string) *redis.PubSu
 }
 
 // GetGame retrieves game state
-func (s *GameService) GetGame(ctx context.Context, gameID string) (*game.GameState, error) {
+func (s *Game) GetGame(ctx context.Context, gameID string) (*game.Game, error) {
 	if s.redisStore == nil {
 		return nil, ErrRedisStoreNotInitialized
 	}
@@ -220,7 +220,7 @@ func (s *GameService) GetGame(ctx context.Context, gameID string) (*game.GameSta
 }
 
 // ListGamesByStatus retrieves a list of games with the specified status
-func (s *GameService) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error) {
+func (s *Game) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.Game, error) {
 	if s.redisStore == nil {
 		return nil, ErrRedisStoreNotInitialized
 	}
@@ -230,7 +230,7 @@ func (s *GameService) ListGamesByStatus(ctx context.Context, status game.Phase) 
 		return nil, fmt.Errorf("failed to list games from db: %w", err)
 	}
 
-	var games []*game.GameState
+	var games []*game.Game
 	for _, id := range ids {
 		g, err := s.redisStore.LoadGame(ctx, id)
 		if err != nil {

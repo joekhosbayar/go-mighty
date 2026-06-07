@@ -22,11 +22,11 @@ import (
 
 type fakeRedisStore struct {
 	mu    sync.RWMutex
-	games map[string]*game.GameState
+	games map[string]*game.Game
 }
 
-func (f *fakeRedisStore) SaveGame(ctx context.Context, g *game.GameState) error { return nil }
-func (f *fakeRedisStore) LoadGame(ctx context.Context, gameID string) (*game.GameState, error) {
+func (f *fakeRedisStore) SaveGame(ctx context.Context, g *game.Game) error { return nil }
+func (f *fakeRedisStore) LoadGame(ctx context.Context, gameID string) (*game.Game, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if g, ok := f.games[gameID]; ok {
@@ -47,7 +47,7 @@ func (f *fakeRedisStore) PublishEvent(ctx context.Context, gameID string, event 
 func (f *fakeRedisStore) Subscribe(ctx context.Context, gameID string) *redis.PubSub { return nil }
 
 func setupLobbyTestEnv(t *testing.T) (*Handler, sqlmock.Sqlmock, *sql.DB) {
-	return setupLobbyTestEnvWithRedis(t, &fakeRedisStore{games: map[string]*game.GameState{}})
+	return setupLobbyTestEnvWithRedis(t, &fakeRedisStore{games: map[string]*game.Game{}})
 }
 
 func setupLobbyTestEnvWithRedis(t *testing.T, redisStore service.RedisStore) (*Handler, sqlmock.Sqlmock, *sql.DB) {
@@ -57,8 +57,8 @@ func setupLobbyTestEnvWithRedis(t *testing.T, redisStore service.RedisStore) (*H
 	}
 
 	pgStore := postgres.NewStoreWithDB(db)
-	svc := service.NewGameService(redisStore, pgStore)
-	authSvc := service.NewAuthService(pgStore, "testsecret")
+	svc := service.NewGame(redisStore, pgStore)
+	authSvc := service.NewAuth(pgStore, "testsecret")
 	handler := NewHandler(svc, authSvc)
 
 	return handler, mock, db
@@ -80,7 +80,7 @@ func generateValidToken(userID, username string) string {
 
 func TestListGamesHandler_Success(t *testing.T) {
 	redisStore := &fakeRedisStore{
-		games: map[string]*game.GameState{
+		games: map[string]*game.Game{
 			"game-123": {ID: "game-123", Status: game.PhaseWaiting},
 			"game-456": {ID: "game-456", Status: game.PhaseWaiting},
 		},
@@ -106,7 +106,7 @@ func TestListGamesHandler_Success(t *testing.T) {
 		t.Errorf("expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
 	}
 
-	var resp []*game.GameState
+	var resp []*game.Game
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestJoinGameHandler_GameFull(t *testing.T) {
 	}
 
 	redisStore := &fakeRedisStore{
-		games: map[string]*game.GameState{
+		games: map[string]*game.Game{
 			"game-123": fullGame,
 		},
 	}

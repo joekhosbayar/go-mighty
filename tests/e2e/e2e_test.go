@@ -21,7 +21,7 @@ type apiFeature struct {
 	userIDs      map[string]string // original_name -> UUID
 	realNames    map[string]string // original_name -> unique_username
 	activeGameID string
-	gameState    *game.GameState
+	game    *game.Game
 	runID        string
 }
 
@@ -97,9 +97,9 @@ func (a *apiFeature) iCreateANewGameWithID(id string) error {
 	
 	a.lastResponse = resp
 	if err == nil && resp.StatusCode() == http.StatusOK {
-		var state game.GameState
+		var state game.Game
 		json.Unmarshal(resp.Body(), &state)
-		a.gameState = &state
+		a.game = &state
 		a.activeGameID = state.ID
 	}
 	return err
@@ -114,9 +114,9 @@ func (a *apiFeature) createsAGame(username, gameID string) error {
 	
 	a.lastResponse = resp
 	if err == nil && resp.StatusCode() == http.StatusOK {
-		var state game.GameState
+		var state game.Game
 		json.Unmarshal(resp.Body(), &state)
-		a.gameState = &state
+		a.game = &state
 		a.activeGameID = state.ID
 	}
 	return err
@@ -129,7 +129,7 @@ func (a *apiFeature) move(username string, moveType game.MoveType, payload inter
 		SetBody(map[string]interface{}{
 			"player_id": a.userIDs[username],
 			"move_type": moveType,
-			"client_version": a.gameState.Version,
+			"client_version": a.game.Version,
 			"payload": payload,
 		}).Post("/games/" + a.activeGameID + "/move")
 	a.lastResponse = resp
@@ -139,7 +139,7 @@ func (a *apiFeature) move(username string, moveType game.MoveType, payload inter
 	if resp.StatusCode() != http.StatusOK {
 		return fmt.Errorf("move %s failed for %s: %s", moveType, username, resp.String())
 	}
-	if err := json.Unmarshal(resp.Body(), a.gameState); err != nil {
+	if err := json.Unmarshal(resp.Body(), a.game); err != nil {
 		return fmt.Errorf(
 			"move %s failed for %s: could not decode response body %q: %w",
 			moveType, username, string(resp.Body()), err,
@@ -161,30 +161,30 @@ func (a *apiFeature) joinsSeatOfGame(username string) error {
 func (a *apiFeature) refreshState() error {
 	resp, err := a.client.R().Get("/games/" + a.activeGameID)
 	if err != nil { return err }
-	var state game.GameState
+	var state game.Game
 	json.Unmarshal(resp.Body(), &state)
-	a.gameState = &state
+	a.game = &state
 	return nil
 }
 
 func (a *apiFeature) waitForStatus(status string) error {
 	for i := 0; i < 30; i++ {
 		a.refreshState()
-		if string(a.gameState.Status) == status { return nil }
+		if string(a.game.Status) == status { return nil }
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for %s, got %s", status, a.gameState.Status)
+	return fmt.Errorf("timeout waiting for %s, got %s", status, a.game.Status)
 }
 
 func (a *apiFeature) findLegalCard(p *game.Player) game.Card {
-	trickIdx := len(a.gameState.Tricks) - 1
+	trickIdx := len(a.game.Tricks) - 1
 	if trickIdx < 0 { return p.Hand[0] }
-	currentTrick := a.gameState.Tricks[trickIdx]
+	currentTrick := a.game.Tricks[trickIdx]
 	if len(currentTrick.Cards) == 0 {
 		for _, c := range p.Hand {
-			if len(a.gameState.Tricks) == 1 && c.Suit == a.gameState.Trump {
+			if len(a.game.Tricks) == 1 && c.Suit == a.game.Trump {
 				hasNon := false
-				for _, c2 := range p.Hand { if c2.Suit != a.gameState.Trump && c2.Rank != game.Joker { hasNon = true; break } }
+				for _, c2 := range p.Hand { if c2.Suit != a.game.Trump && c2.Rank != game.Joker { hasNon = true; break } }
 				if hasNon { continue }
 			}
 			return c
@@ -199,8 +199,8 @@ func (a *apiFeature) playOutGame() error {
 	for trick := 1; trick <= 10; trick++ {
 		for i := 0; i < 5; i++ {
 			a.refreshState()
-			if a.gameState.Status == game.PhaseFinished { return nil }
-			p := a.gameState.Players[a.gameState.CurrentTurn]
+			if a.game.Status == game.PhaseFinished { return nil }
+			p := a.game.Players[a.game.CurrentTurn]
 			var name string
 			for n, id := range a.userIDs { if id == p.ID { name = n; break } }
 			card := a.findLegalCard(p)
@@ -215,7 +215,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	api := &apiFeature{client: resty.New().SetBaseURL("http://localhost:8080")}
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		api.tokens = make(map[string]string); api.userIDs = make(map[string]string); api.realNames = make(map[string]string)
-		api.gameState = nil; api.activeGameID = ""; api.runID = fmt.Sprintf("%d", time.Now().UnixNano())
+		api.game = nil; api.activeGameID = ""; api.runID = fmt.Sprintf("%d", time.Now().UnixNano())
 		return ctx, nil
 	})
 
@@ -268,7 +268,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^"([^"]*)" discards (\d+) least powerful cards$`, func(u string, c int) error {
 		api.refreshState()
 		var cards []game.Card
-		for _, p := range api.gameState.Players { if p != nil && p.ID == api.userIDs[u] { cards = p.Hand[:3]; break } }
+		for _, p := range api.game.Players { if p != nil && p.ID == api.userIDs[u] { cards = p.Hand[:3]; break } }
 		return api.move(u, game.MoveDiscard, cards)
 	})
 	ctx.Step(`^"([^"]*)" calls the "([^"]*)" as the friend$`, func(u, c string) error {
@@ -279,7 +279,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^all players play out Trick (\d+) legally$`, func(i int) error {
 		for j := 0; j < 5; j++ {
 			api.refreshState()
-			p := api.gameState.Players[api.gameState.CurrentTurn]
+			p := api.game.Players[api.game.CurrentTurn]
 			var name string
 			for n, id := range api.userIDs { if id == p.ID { name = n; break } }
 			card := api.findLegalCard(p)

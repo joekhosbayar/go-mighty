@@ -30,7 +30,7 @@ func NewStore(connStr string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (s *Store) CreateGame(ctx context.Context, g *game.GameState) (err error) {
+func (s *Store) CreateGame(ctx context.Context, g *game.Game) (err error) {
 	start := time.Now()
 	defer func() {
 		log.Debug().

@@ -82,7 +82,7 @@ func (d dummyResult) RowsAffected() (int64, error) { return 0, nil }
 // Table-driven unit tests
 // ----------------------------
 
-func TestPostgresClient_Ping(t *testing.T) {
+func TestPostgres_Ping(t *testing.T) {
 	tests := []struct {
 		name    string
 		fakeErr error
@@ -95,7 +95,7 @@ func TestPostgresClient_Ping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &fakeClient{PingContextErr: tt.fakeErr}
-			client := &PostgresClient{db: fake}
+			client := &Postgres{db: fake}
 
 			err := client.Ping(context.Background())
 			if (err != nil) != tt.wantErr {
@@ -105,7 +105,7 @@ func TestPostgresClient_Ping(t *testing.T) {
 	}
 }
 
-func TestPostgresClient_Exec(t *testing.T) {
+func TestPostgres_Exec(t *testing.T) {
 	dummyRes := dummyResult{}
 	tests := []struct {
 		name       string
@@ -123,7 +123,7 @@ func TestPostgresClient_Exec(t *testing.T) {
 				ExecContextErr: tt.execErr,
 				ExecContextVal: tt.execResult,
 			}
-			client := &PostgresClient{db: fake}
+			client := &Postgres{db: fake}
 
 			err := client.Exec(context.Background(), "INSERT INTO test VALUES(1)")
 			if (err != nil) != tt.wantErr {
@@ -133,7 +133,7 @@ func TestPostgresClient_Exec(t *testing.T) {
 	}
 }
 
-func TestPostgresClient_QueryRow(t *testing.T) {
+func TestPostgres_QueryRow(t *testing.T) {
 	tests := []struct {
 		name        string
 		rowVal      any
@@ -151,7 +151,7 @@ func TestPostgresClient_QueryRow(t *testing.T) {
 				QueryRowVal: tt.rowVal,
 				QueryRowErr: tt.rowErr,
 			}
-			client := &PostgresClient{db: fake}
+			client := &Postgres{db: fake}
 
 			row := client.db.QueryRowContext(context.Background(), "SELECT val FROM test")
 			var val string
@@ -166,7 +166,7 @@ func TestPostgresClient_QueryRow(t *testing.T) {
 	}
 }
 
-func TestPostgresClient_QueryContext(t *testing.T) {
+func TestPostgres_QueryContext(t *testing.T) {
 	tests := []struct {
 		name     string
 		queryErr error
@@ -181,7 +181,7 @@ func TestPostgresClient_QueryContext(t *testing.T) {
 			fake := &fakeClient{
 				QueryContextErr: tt.queryErr,
 			}
-			client := &PostgresClient{db: fake}
+			client := &Postgres{db: fake}
 
 			rows, err := client.db.QueryContext(context.Background(), "SELECT val FROM test")
 			if (err != nil) != tt.wantErr {

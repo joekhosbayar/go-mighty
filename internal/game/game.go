@@ -31,8 +31,8 @@ type PlayCardMove struct {
 	CallJoker bool `json:"call_joker"`
 }
 
-// GameConfig holds configuration for the game
-type GameConfig struct {
+// Config holds configuration for the game
+type Config struct {
 	MaxPlayers   int `json:"max_players"`
 	WinningScore int `json:"winning_score"` // usually 3-10
 }
@@ -55,8 +55,8 @@ type Bid struct {
 	IsNoTrump bool   `json:"is_no_trump"`
 }
 
-// GameState represents the complete state of a single game
-type GameState struct {
+// Game represents the complete state of a single game
+type Game struct {
 	ID      string     `json:"id"`
 	Status  Phase      `json:"status"`
 	Players [5]*Player `json:"players"`
@@ -107,9 +107,9 @@ type PlayedCard struct {
 	Card     Card   `json:"card"`
 }
 
-// NewGame creates a new game instance
-func NewGame(id string) *GameState {
-	g := &GameState{
+// New creates a new game instance
+func New(id string) *Game {
+	g := &Game{
 		ID:            id,
 		Status:        PhaseWaiting,
 		Players:       [5]*Player{},
@@ -126,7 +126,7 @@ func NewGame(id string) *GameState {
 }
 
 // IsFull checks if the game has 5 players
-func (g *GameState) IsFull() bool {
+func (g *Game) IsFull() bool {
 	count := 0
 	for _, p := range g.Players {
 		if p != nil {
@@ -137,7 +137,7 @@ func (g *GameState) IsFull() bool {
 }
 
 // Start deals the cards and starts the bidding phase
-func (g *GameState) Start() {
+func (g *Game) Start() {
 	deck := NewDeck()
 	deck.Shuffle()
 	hands, kitty := deck.Deal()

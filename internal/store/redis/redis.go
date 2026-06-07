@@ -32,7 +32,7 @@ func (s *Store) Key(gameID string) string {
 	return fmt.Sprintf("game:%s", gameID)
 }
 
-func (s *Store) SaveGame(ctx context.Context, g *game.GameState) (err error) {
+func (s *Store) SaveGame(ctx context.Context, g *game.Game) (err error) {
 	start := time.Now()
 	key := s.Key(g.ID)
 	defer func() {
@@ -70,7 +70,7 @@ func (s *Store) SaveGame(ctx context.Context, g *game.GameState) (err error) {
 	return s.client.Set(ctx, key+":version", g.Version, 24*time.Hour).Err()
 }
 
-func (s *Store) LoadGame(ctx context.Context, gameID string) (g *game.GameState, err error) {
+func (s *Store) LoadGame(ctx context.Context, gameID string) (g *game.Game, err error) {
 	start := time.Now()
 	key := s.Key(gameID)
 	defer func() {
@@ -100,7 +100,7 @@ func (s *Store) LoadGame(ctx context.Context, gameID string) (g *game.GameState,
 		return nil, err
 	}
 
-	var loadedGame game.GameState
+	var loadedGame game.Game
 	if err := json.Unmarshal(data, &loadedGame); err != nil {
 		return nil, err
 	}

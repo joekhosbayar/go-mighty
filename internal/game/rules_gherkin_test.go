@@ -9,15 +9,15 @@ import (
 )
 
 type engineFeature struct {
-	gameState *GameState
+	game *Game
 	lastErr   error
 }
 
 func (e *engineFeature) fiveAuthenticatedPlayers(p1, p2, p3, p4, p5 string) error {
-	e.gameState = NewGame("test-engine-game")
+	e.game = New("test-engine-game")
 	names := []string{p1, p2, p3, p4, p5}
 	for i, name := range names {
-		e.gameState.Players[i] = &Player{
+		e.game.Players[i] = &Player{
 			ID:   fmt.Sprintf("user-%d", i),
 			Name: name,
 			Seat: i,
@@ -33,7 +33,7 @@ func (e *engineFeature) createsAHighStakesGame(username, gameID string) error {
 
 func (e *engineFeature) joinTheGame(p1, p2, p3, p4, p5, gameID string) error {
 	// Handled in fiveAuthenticatedPlayers
-	e.gameState.Status = PhaseBidding
+	e.game.Status = PhaseBidding
 	return nil
 }
 
@@ -42,46 +42,46 @@ func (e *engineFeature) winsAContract(username string, bidStr string) error {
 	var suit string
 	fmt.Sscanf(bidStr, "%d %s", &points, &suit)
 	
-	e.gameState.Contract = &Bid{
+	e.game.Contract = &Bid{
 		Points: points,
 		Suit:   Suit(suit),
 	}
-	e.gameState.Trump = Suit(suit)
-	e.gameState.Declarer = 0 // Assume Alice is seat 0
-	e.gameState.Status = PhaseExchanging
+	e.game.Trump = Suit(suit)
+	e.game.Declarer = 0 // Assume Alice is seat 0
+	e.game.Status = PhaseExchanging
 	return nil
 }
 
 func (e *engineFeature) discardsCards(username string, count int) error {
-	e.gameState.Status = PhaseCalling
+	e.game.Status = PhaseCalling
 	return nil
 }
 
 func (e *engineFeature) callsTheAsTheFriend(username, cardStr string) error {
-	e.gameState.Status = PhasePlaying
+	e.game.Status = PhasePlaying
 	// Add initial trick
-	e.gameState.Tricks = append(e.gameState.Tricks, Trick{Cards: []PlayedCard{}})
+	e.game.Tricks = append(e.game.Tricks, Trick{Cards: []PlayedCard{}})
 	return nil
 }
 
 func (e *engineFeature) theGameStatusShouldBe(gameID, status string) error {
-	if string(e.gameState.Status) != status {
-		return fmt.Errorf("expected status %s, got %s", status, e.gameState.Status)
+	if string(e.game.Status) != status {
+		return fmt.Errorf("expected status %s, got %s", status, e.game.Status)
 	}
 	return nil
 }
 
 func (e *engineFeature) itIsTrick(trickNum int) error {
-	e.gameState.Tricks = make([]Trick, trickNum)
+	e.game.Tricks = make([]Trick, trickNum)
 	for i := 0; i < trickNum-1; i++ {
-		e.gameState.Tricks[i] = Trick{Winner: 0, Cards: make([]PlayedCard, 5)}
+		e.game.Tricks[i] = Trick{Winner: 0, Cards: make([]PlayedCard, 5)}
 	}
-	e.gameState.Tricks[trickNum-1] = Trick{Cards: []PlayedCard{}}
+	e.game.Tricks[trickNum-1] = Trick{Cards: []PlayedCard{}}
 	return nil
 }
 
 func (e *engineFeature) theTrumpSuitIs(suit string) error {
-	e.gameState.Trump = Suit(suit)
+	e.game.Trump = Suit(suit)
 	return nil
 }
 
@@ -92,14 +92,14 @@ func (e *engineFeature) leadsThe(username, cardStr string) error {
 func (e *engineFeature) playsThe(username, cardStr string) error {
 	card := parseCard(cardStr)
 	// Force card into hand if not present for test
-	p := e.gameState.Players[e.gameState.CurrentTurn]
+	p := e.game.Players[e.game.CurrentTurn]
 	if !p.HasCard(card) {
 		p.Hand = append(p.Hand, card)
 	}
 	
-	e.lastErr = e.gameState.ValidateMove(p.ID, MovePlayCard, PlayCardMove{Card: card})
+	e.lastErr = e.game.ValidateMove(p.ID, MovePlayCard, PlayCardMove{Card: card})
 	if e.lastErr == nil {
-		e.gameState.ApplyMove(p.ID, MovePlayCard, PlayCardMove{Card: card})
+		e.game.ApplyMove(p.ID, MovePlayCard, PlayCardMove{Card: card})
 	}
 	return nil
 }
@@ -107,8 +107,8 @@ func (e *engineFeature) playsThe(username, cardStr string) error {
 func (e *engineFeature) theShouldWinTheTrick(cardStr string) error {
 	// The current trick just finished or is in progress.
 	// Since we are unit testing ApplyMove, we need to check ResolveTrick results.
-	trickIdx := len(e.gameState.Tricks) - 1
-	t := e.gameState.Tricks[trickIdx]
+	trickIdx := len(e.game.Tricks) - 1
+	t := e.game.Tricks[trickIdx]
 	if len(t.Cards) < 5 {
 		// Mock remaining players to finish trick
 		for len(t.Cards) < 5 {
@@ -116,7 +116,7 @@ func (e *engineFeature) theShouldWinTheTrick(cardStr string) error {
 		}
 	}
 	
-	e.gameState.ResolveTrick(t)
+	e.game.ResolveTrick(t)
 	// Find if the "winning card" is the one at the winning seat
 	// Simplified: Check if ResolveTrick correctly picks the highest power
 	return nil
@@ -130,7 +130,7 @@ func (e *engineFeature) shouldBeTheNextTurn(username string) error {
 func (e *engineFeature) hasThe(username, cardStr string) error {
 	card := parseCard(cardStr)
 	// Find player
-	for _, p := range e.gameState.Players {
+	for _, p := range e.game.Players {
 		if p.Name == username {
 			if !p.HasCard(card) {
 				p.Hand = append(p.Hand, card)
@@ -143,22 +143,22 @@ func (e *engineFeature) hasThe(username, cardStr string) error {
 
 func (e *engineFeature) leadsTheAndCallsOutTheJoker(username, cardStr string) error {
 	card := parseCard(cardStr)
-	p := e.gameState.Players[e.gameState.CurrentTurn]
+	p := e.game.Players[e.game.CurrentTurn]
 	if !p.HasCard(card) {
 		p.Hand = append(p.Hand, card)
 	}
 	
 	move := PlayCardMove{Card: card, CallJoker: true}
-	e.lastErr = e.gameState.ValidateMove(p.ID, MovePlayCard, move)
+	e.lastErr = e.game.ValidateMove(p.ID, MovePlayCard, move)
 	if e.lastErr == nil {
-		e.gameState.ApplyMove(p.ID, MovePlayCard, move)
+		e.game.ApplyMove(p.ID, MovePlayCard, move)
 	}
 	return nil
 }
 
 func (e *engineFeature) shouldStillHaveTheInHand(username, cardStr string) error {
 	card := parseCard(cardStr)
-	for _, p := range e.gameState.Players {
+	for _, p := range e.game.Players {
 		if p.Name == username {
 			if !p.HasCard(card) {
 				return fmt.Errorf("%s does not have %s in hand", username, cardStr)

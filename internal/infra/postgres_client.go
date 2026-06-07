@@ -32,11 +32,11 @@ type Database interface {
 // Postgres client
 // ----------------------------
 
-type PostgresClient struct {
+type Postgres struct {
 	db Database
 }
 
-func (p *PostgresClient) Close() error {
+func (p *Postgres) Close() error {
 	if p.db == nil {
 		return nil
 	}
@@ -47,16 +47,16 @@ func (p *PostgresClient) Close() error {
 
 	return nil
 }
-func (p *PostgresClient) Ping(ctx context.Context) error {
+func (p *Postgres) Ping(ctx context.Context) error {
 	return p.db.PingContext(ctx)
 }
 
-func (p *PostgresClient) Exec(ctx context.Context, query string, args ...any) error {
+func (p *Postgres) Exec(ctx context.Context, query string, args ...any) error {
 	_, err := p.db.ExecContext(ctx, query, args...)
 	return err
 }
 
-func (p *PostgresClient) QueryRow(ctx context.Context, query string, args ...any) Row {
+func (p *Postgres) QueryRow(ctx context.Context, query string, args ...any) Row {
 	return p.db.QueryRowContext(ctx, query, args...)
 }
 
@@ -114,7 +114,7 @@ func readSecret(secretName string, envVarName string) string {
 // Constructor
 // ----------------------------
 
-func ProvidePostgresClient() *PostgresClient {
+func NewPostgres() *Postgres {
 	host := os.Getenv("POSTGRES_HOST")
 	if host == "" {
 		host = "postgres"
@@ -160,7 +160,7 @@ func ProvidePostgresClient() *PostgresClient {
 	db.SetMaxIdleConns(25)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	return &PostgresClient{
+	return &Postgres{
 		db: &realDatabase{conn: db},
 	}
 }

@@ -17,7 +17,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
-type AuthService struct {
+type Auth struct {
 	store     *postgres.Store
 	jwtSecret []byte
 }
@@ -28,14 +28,14 @@ type AuthClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAuthService(store *postgres.Store, jwtSecret string) *AuthService {
-	return &AuthService{
+func NewAuth(store *postgres.Store, jwtSecret string) *Auth {
+	return &Auth{
 		store:     store,
 		jwtSecret: []byte(jwtSecret),
 	}
 }
 
-func (s *AuthService) Signup(ctx context.Context, username, password, email string) (*postgres.User, error) {
+func (s *Auth) Signup(ctx context.Context, username, password, email string) (*postgres.User, error) {
 	existing, err := s.store.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err
@@ -69,7 +69,7 @@ func (s *AuthService) Signup(ctx context.Context, username, password, email stri
 	return user, nil
 }
 
-func (s *AuthService) Login(ctx context.Context, username, password string) (string, error) {
+func (s *Auth) Login(ctx context.Context, username, password string) (string, error) {
 	user, err := s.store.GetUserByUsername(ctx, username)
 	if err != nil {
 		return "", err
@@ -95,7 +95,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 	return token.SignedString(s.jwtSecret)
 }
 
-func (s *AuthService) ValidateToken(tokenString string) (*AuthClaims, error) {
+func (s *Auth) ValidateToken(tokenString string) (*AuthClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &AuthClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, errors.New("unexpected signing method")

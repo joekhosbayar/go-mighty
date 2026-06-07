@@ -28,15 +28,15 @@ type fakeWSGameService struct {
 	processMoveErr    error
 }
 
-func (f *fakeWSGameService) CreateGame(ctx context.Context, id string) (*game.GameState, error) {
+func (f *fakeWSGameService) CreateGame(ctx context.Context, id string) (*game.Game, error) {
 	return nil, nil
 }
 
-func (f *fakeWSGameService) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.GameState, error) {
+func (f *fakeWSGameService) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.Game, error) {
 	return nil, nil
 }
 
-func (f *fakeWSGameService) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.GameState, error) {
+func (f *fakeWSGameService) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.Game, error) {
 	f.mu.Lock()
 	f.processMoveCalled = true
 	f.mu.Unlock()
@@ -65,18 +65,18 @@ func (f *fakeWSGameService) ProcessMove(ctx context.Context, gameID, playerID st
 		return nil, err
 	}
 
-	return &game.GameState{ID: gameID}, nil
+	return &game.Game{ID: gameID}, nil
 }
 
 func (f *fakeWSGameService) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
 	return f.redisClient.Subscribe(ctx, "game:"+gameID+":events")
 }
 
-func (f *fakeWSGameService) GetGame(ctx context.Context, gameID string) (*game.GameState, error) {
+func (f *fakeWSGameService) GetGame(ctx context.Context, gameID string) (*game.Game, error) {
 	return nil, nil
 }
 
-func (f *fakeWSGameService) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error) {
+func (f *fakeWSGameService) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.Game, error) {
 	return nil, nil
 }
 
@@ -105,7 +105,7 @@ func setupWSTestHandler(t *testing.T) (*Handler, func()) {
 		redisClient:   client,
 		processMoveCh: make(chan struct{}, 1),
 	}
-	authSvc := service.NewAuthService(&postgres.Store{}, "testsecret")
+	authSvc := service.NewAuth(&postgres.Store{}, "testsecret")
 	handler := NewHandler(svc, authSvc)
 
 	cleanup := func() {

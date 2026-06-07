@@ -22,8 +22,8 @@ func setupAuthTestEnv(t *testing.T) (*Handler, sqlmock.Sqlmock, *sql.DB) {
 	}
 
 	pgStore := postgres.NewStoreWithDB(db)
-	svc := service.NewGameService(nil, pgStore) // redisStore is nil, ok for auth tests
-	authSvc := service.NewAuthService(pgStore, "testsecret")
+	svc := service.NewGame(nil, pgStore) // redisStore is nil, ok for auth tests
+	authSvc := service.NewAuth(pgStore, "testsecret")
 	handler := NewHandler(svc, authSvc)
 
 	return handler, mock, db

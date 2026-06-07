@@ -10,7 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type RedisClient struct {
+type Redis struct {
 	client ClientGetterSetter
 }
 
@@ -20,22 +20,22 @@ type ClientGetterSetter interface {
 	Get(ctx context.Context, key string) *redis.StringCmd
 }
 
-func (c *RedisClient) PingRedis(ctx context.Context) (string, error) {
+func (c *Redis) Ping(ctx context.Context) (string, error) {
 	pong, err := c.client.Ping(ctx).Result()
 	return pong, err
 }
 
-func (c *RedisClient) SetVal(ctx context.Context, key string, val string, expiration time.Duration) error {
+func (c *Redis) Set(ctx context.Context, key string, val string, expiration time.Duration) error {
 	err := c.client.Set(ctx, key, val, expiration).Err()
 	return err
 }
 
-func (c *RedisClient) GetVal(ctx context.Context, key string) (string, error) {
+func (c *Redis) Get(ctx context.Context, key string) (string, error) {
 	val, err := c.client.Get(ctx, key).Result()
 	return val, err
 }
 
-func ProvideRedisClient() *RedisClient {
+func NewRedis() *Redis {
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
 		addr = "redis:6379"
@@ -58,7 +58,7 @@ func ProvideRedisClient() *RedisClient {
 		DB:       db,
 	})
 
-	return &RedisClient{
+	return &Redis{
 		client: rdb,
 	}
 }

@@ -10,14 +10,14 @@ import (
 )
 
 // IMPLEMENT PING, SET, GET STUBS
-type fakeRedisClient struct {
+type fakeRedis struct {
 	pingErr error
 	getVal  string
 	getErr  error
 	setErr  error
 }
 
-func (f *fakeRedisClient) Ping(ctx context.Context) *redis.StatusCmd {
+func (f *fakeRedis) Ping(ctx context.Context) *redis.StatusCmd {
 	cmd := redis.NewStatusCmd(ctx)
 	if f.pingErr != nil {
 		cmd.SetErr(f.pingErr)
@@ -27,7 +27,7 @@ func (f *fakeRedisClient) Ping(ctx context.Context) *redis.StatusCmd {
 	return cmd
 }
 
-func (f *fakeRedisClient) Set(
+func (f *fakeRedis) Set(
 	ctx context.Context,
 	key string,
 	value interface{},
@@ -40,7 +40,7 @@ func (f *fakeRedisClient) Set(
 	return cmd
 }
 
-func (f *fakeRedisClient) Get(ctx context.Context, key string) *redis.StringCmd {
+func (f *fakeRedis) Get(ctx context.Context, key string) *redis.StringCmd {
 	cmd := redis.NewStringCmd(ctx)
 	if f.getErr != nil {
 		cmd.SetErr(f.getErr)
@@ -53,12 +53,12 @@ func (f *fakeRedisClient) Get(ctx context.Context, key string) *redis.StringCmd 
 // BEGIN UNIT TESTS HERE
 
 func TestPingSuccess(t *testing.T) {
-	fakeClient := &fakeRedisClient{}
-	client := RedisClient{
+	fakeClient := &fakeRedis{}
+	client := Redis{
 		client: fakeClient,
 	}
 
-	pong, err := client.PingRedis(context.Background())
+	pong, err := client.Ping(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,15 +69,15 @@ func TestPingSuccess(t *testing.T) {
 
 func TestPingFailure(t *testing.T) {
 	expectedErr := errors.New("connection refused")
-	fakeClient := &fakeRedisClient{
+	fakeClient := &fakeRedis{
 		pingErr: expectedErr,
 	}
 
-	client := RedisClient{
+	client := Redis{
 		client: fakeClient,
 	}
 
-	_, err := client.PingRedis(context.Background())
+	_, err := client.Ping(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -89,11 +89,11 @@ func TestPingFailure(t *testing.T) {
 }
 
 func TestSetSuccess(t *testing.T) {
-	fakeClient := &fakeRedisClient{}
-	client := RedisClient{
+	fakeClient := &fakeRedis{}
+	client := Redis{
 		client: fakeClient,
 	}
-	err := client.SetVal(context.Background(), "key", "value", time.Second)
+	err := client.Set(context.Background(), "key", "value", time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,13 +101,13 @@ func TestSetSuccess(t *testing.T) {
 
 func TestSetFailure(t *testing.T) {
 	expectedErr := errors.New("connection refused")
-	fakeClient := &fakeRedisClient{
+	fakeClient := &fakeRedis{
 		setErr: expectedErr,
 	}
-	client := RedisClient{
+	client := Redis{
 		client: fakeClient,
 	}
-	err := client.SetVal(context.Background(), "key", "value", time.Second)
+	err := client.Set(context.Background(), "key", "value", time.Second)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -119,12 +119,12 @@ func TestSetFailure(t *testing.T) {
 }
 
 func TestGetSuccess(t *testing.T) {
-	fakeClient := &fakeRedisClient{}
-	client := RedisClient{
+	fakeClient := &fakeRedis{}
+	client := Redis{
 		client: fakeClient,
 	}
 
-	_, err := client.GetVal(context.Background(), "key")
+	_, err := client.Get(context.Background(), "key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,13 +132,13 @@ func TestGetSuccess(t *testing.T) {
 
 func TestGetFailure(t *testing.T) {
 	expectedErr := errors.New("connection refused")
-	fakeClient := &fakeRedisClient{
+	fakeClient := &fakeRedis{
 		getErr: expectedErr,
 	}
-	client := RedisClient{
+	client := Redis{
 		client: fakeClient,
 	}
-	_, err := client.GetVal(context.Background(), "key")
+	_, err := client.Get(context.Background(), "key")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")

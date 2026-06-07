@@ -25,7 +25,7 @@ const (
 )
 
 // ValidateMove checks if a move is valid for the current game state
-func (g *GameState) ValidateMove(playerID string, moveType MoveType, payload interface{}) error {
+func (g *Game) ValidateMove(playerID string, moveType MoveType, payload interface{}) error {
 	// 1. Check if player is in the game
 	p := g.GetPlayer(playerID)
 	if p == nil {
@@ -54,7 +54,7 @@ func (g *GameState) ValidateMove(playerID string, moveType MoveType, payload int
 	}
 }
 
-func (g *GameState) GetPlayer(id string) *Player {
+func (g *Game) GetPlayer(id string) *Player {
 	for _, p := range g.Players {
 		if p != nil && p.ID == id {
 			return p
@@ -75,7 +75,7 @@ func (p *Player) HasCard(c Card) bool {
 
 // validateBid checks if the bid is valid
 // Payload expected: Bid struct
-func (g *GameState) validateBid(p *Player, payload interface{}) error {
+func (g *Game) validateBid(p *Player, payload interface{}) error {
 	if g.Status != PhaseBidding {
 		return fmt.Errorf("%w: not in bidding phase", ErrInvalidMove)
 	}
@@ -132,7 +132,7 @@ func (g *GameState) validateBid(p *Player, payload interface{}) error {
 	return nil
 }
 
-func (g *GameState) validatePass(p *Player) error {
+func (g *Game) validatePass(p *Player) error {
 	if g.Status != PhaseBidding {
 		return fmt.Errorf("%w: not in bidding phase", ErrInvalidMove)
 	}
@@ -144,7 +144,7 @@ func (g *GameState) validatePass(p *Player) error {
 
 // validateDiscard
 // Payload: []Card (3 cards)
-func (g *GameState) validateDiscard(p *Player, payload interface{}) error {
+func (g *Game) validateDiscard(p *Player, payload interface{}) error {
 	if g.Status != PhaseExchanging {
 		return fmt.Errorf("%w: not in exchanging phase", ErrInvalidMove)
 	}
@@ -172,7 +172,7 @@ func (g *GameState) validateDiscard(p *Player, payload interface{}) error {
 
 // validateCallPartner
 // Payload: Card (the partner card)
-func (g *GameState) validateCallPartner(p *Player, payload interface{}) error {
+func (g *Game) validateCallPartner(p *Player, payload interface{}) error {
 	if g.Status != PhaseCalling {
 		return fmt.Errorf("%w: not in calling phase", ErrInvalidMove)
 	}
@@ -192,7 +192,7 @@ func (g *GameState) validateCallPartner(p *Player, payload interface{}) error {
 
 // validatePlayCard
 // Payload: PlayCardMove
-func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
+func (g *Game) validatePlayCard(p *Player, payload interface{}) error {
 	if g.Status != PhasePlaying {
 		return fmt.Errorf("%w: not in playing phase", ErrInvalidMove)
 	}
@@ -282,7 +282,7 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 
 // Helpers
 
-func (g *GameState) IsMighty(c Card) bool {
+func (g *Game) IsMighty(c Card) bool {
 	// Usually Ace of Spades.
 	// If Spades is Trump, Ace of Clubs is Mighty.
 	if g.Trump == Spades {
@@ -291,7 +291,7 @@ func (g *GameState) IsMighty(c Card) bool {
 	return c.Suit == Spades && c.Rank == Ace
 }
 
-func (g *GameState) IsJokerCaller(c Card) bool {
+func (g *Game) IsJokerCaller(c Card) bool {
 	// Usually Three of Clubs.
 	// If Clubs is Trump, Three of Spades is Joker Caller.
 	if g.Trump == Clubs {
@@ -332,7 +332,7 @@ func (p *Player) HasNonTrump(trump Suit) bool {
 
 // ApplyMove applies the move to the game state
 // Assumes ValidateMove has already been called
-func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interface{}) error {
+func (g *Game) ApplyMove(playerID string, moveType MoveType, payload interface{}) error {
 	p := g.GetPlayer(playerID)
 
 	switch moveType {
@@ -504,7 +504,7 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 }
 
 // ResolveTrick determines the winner and points
-func (g *GameState) ResolveTrick(t Trick) (int, []Card) {
+func (g *Game) ResolveTrick(t Trick) (int, []Card) {
 	winnerIdx := 0
 	maxPower := -1
 	points := []Card{}
@@ -528,7 +528,7 @@ func (g *GameState) ResolveTrick(t Trick) (int, []Card) {
 }
 
 // CalculatePower determines the contextual strength of a card
-func (g *GameState) CalculatePower(c Card, t Trick, trickNum int) int {
+func (g *Game) CalculatePower(c Card, t Trick, trickNum int) int {
 	// 1. Mighty beats everything
 	if g.IsMighty(c) {
 		return PowerMighty
@@ -569,13 +569,13 @@ func (g *GameState) CalculatePower(c Card, t Trick, trickNum int) int {
 }
 
 // Beats returns true if c1 beats c2
-func (g *GameState) Beats(c1, c2 Card, t Trick) bool {
+func (g *Game) Beats(c1, c2 Card, t Trick) bool {
 	trickNum := len(g.Tricks)
 	return g.CalculatePower(c1, t, trickNum) > g.CalculatePower(c2, t, trickNum)
 }
 
 // CalculateFinalScore calculates the final points for the declarer and friend
-func (g *GameState) CalculateFinalScore() (float64, float64) {
+func (g *Game) CalculateFinalScore() (float64, float64) {
 	if g.Contract == nil {
 		return 0, 0
 	}
