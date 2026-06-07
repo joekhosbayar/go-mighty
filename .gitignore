@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# Docker Logs
+docker_logs.txt
+
 # Docker secrets
 secrets/*.txt
 

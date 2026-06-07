@@ -14,6 +14,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	WSMessageTypeMove  = "MOVE"
+	WSMessageTypeError = "ERROR"
+)
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -35,21 +40,21 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// IncomingWSMessage defines the structure of messages sent by the client over WebSocket
+// IncomingWSMessage defines the structure of messages sent by the client over WebSocket.
 type IncomingWSMessage struct {
 	Type          string        `json:"type"` // e.g., "MOVE"
 	MoveType      game.MoveType `json:"move_type"`
-	Payload       interface{}   `json:"payload"`
+	Payload       any           `json:"payload"`
 	ClientVersion int64         `json:"client_version"`
 }
 
-// OutgoingWSError defines the structure of error messages sent to the client
+// OutgoingWSError defines the structure of error messages sent to the client.
 type OutgoingWSError struct {
 	Type  string `json:"type"` // "ERROR"
 	Error string `json:"error"`
 }
 
-// WSHandler handles websocket connections
+// WSHandler handles websocket connections.
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
 
@@ -58,9 +63,10 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	var wsWriteMu sync.Mutex
+
 	sendError := func(errMsg string) {
 		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
 			log.Warn().Str("game_id", gameID).Err(wsErr).Msg("Failed to send websocket error")
@@ -68,7 +74,8 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Wait for First Message Auth with 5s timeout
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
 	_, authMessage, err := conn.ReadMessage()
 	if err != nil {
 		var netErr net.Error
@@ -77,7 +84,9 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			sendError("failed to read auth message")
 		}
+
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to read auth message or timed out")
+
 		return
 	}
 
@@ -97,14 +106,14 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Reset deadline after successful auth
-	conn.SetReadDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Time{})
 
 	pubsub := h.svc.Subscribe(r.Context(), gameID)
 	if pubsub == nil {
 		sendError("websocket unavailable")
 		return
 	}
-	defer pubsub.Close()
+	defer func() { _ = pubsub.Close() }()
 
 	ch := pubsub.Channel()
 
@@ -115,6 +124,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-done:
@@ -123,6 +133,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 				wsWriteMu.Lock()
 				err := conn.WriteMessage(websocket.PingMessage, nil)
 				wsWriteMu.Unlock()
+
 				if err != nil {
 					return
 				}
@@ -134,6 +145,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 				wsWriteMu.Lock()
 				err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
 				wsWriteMu.Unlock()
+
 				if err != nil {
 					return
 				}
@@ -148,6 +160,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Error().Str("game_id", gameID).Str("user_id", claims.UserID).Err(err).Msg("WebSocket read error")
 			}
+
 			break
 		}
 
@@ -157,7 +170,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if inMsg.Type == "MOVE" {
+		if inMsg.Type == WSMessageTypeMove {
 			convertedPayload, err := ConvertPayload(inMsg.MoveType, inMsg.Payload)
 			if err != nil {
 				sendError("invalid payload structure: " + err.Error())
@@ -179,14 +192,17 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) sendWSError(conn *websocket.Conn, errMsg string, writeMu *sync.Mutex) error {
 	errPayload := OutgoingWSError{
-		Type:  "ERROR",
+		Type:  WSMessageTypeError,
 		Error: errMsg,
 	}
+
 	data, err := json.Marshal(errPayload)
 	if err != nil {
 		return err
 	}
+
 	writeMu.Lock()
 	defer writeMu.Unlock()
+
 	return conn.WriteMessage(websocket.TextMessage, data)
 }

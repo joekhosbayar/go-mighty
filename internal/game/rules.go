@@ -1,12 +1,14 @@
+// Package game implements the rules and logic for validating and applying moves in the Mighty card game.
 package game
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
 
-// ErrInvalidMove is returned when a move is invalid
-var ErrInvalidMove = fmt.Errorf("invalid move")
+// ErrInvalidMove is returned when a move is invalid.
+var ErrInvalidMove = errors.New("invalid move")
 
 var suitRank = map[Suit]int{
 	Clubs:    1,
@@ -15,17 +17,22 @@ var suitRank = map[Suit]int{
 	Spades:   4,
 }
 
-// Power Constants for the Mighty Engine
+// Power constants for the Mighty engine, used to determine card strength in a trick.
 const (
+	// PowerMighty represents the strength of the Mighty card (highest).
 	PowerMighty = 1000
-	PowerJoker  = 500
-	PowerTrump  = 100
-	PowerLead   = 10
-	PowerBase   = 0
+	// PowerJoker represents the base strength of the Joker card.
+	PowerJoker = 500
+	// PowerTrump represents the base strength of a trump suit card.
+	PowerTrump = 100
+	// PowerLead represents the base strength of a card matching the lead suit.
+	PowerLead = 10
+	// PowerBase represents the base strength of any other card.
+	PowerBase = 0
 )
 
-// ValidateMove checks if a move is valid for the current game state
-func (g *GameState) ValidateMove(playerID string, moveType MoveType, payload interface{}) error {
+// ValidateMove checks if a move is valid for the current game state.
+func (g *Game) ValidateMove(playerID string, moveType MoveType, payload any) error {
 	// 1. Check if player is in the game
 	p := g.GetPlayer(playerID)
 	if p == nil {
@@ -50,39 +57,42 @@ func (g *GameState) ValidateMove(playerID string, moveType MoveType, payload int
 	case MovePlayCard:
 		return g.validatePlayCard(p, payload)
 	default:
-		return fmt.Errorf("unknown move type")
+		return errors.New("unknown move type")
 	}
 }
 
-func (g *GameState) GetPlayer(id string) *Player {
+// GetPlayer retrieves a player by their ID.
+func (g *Game) GetPlayer(id string) *Player {
 	for _, p := range g.Players {
 		if p != nil && p.ID == id {
 			return p
 		}
 	}
+
 	return nil
 }
 
-// Helper to check if a card is in hand
+// Helper to check if a card is in hand.
 func (p *Player) HasCard(c Card) bool {
 	for _, handCard := range p.Hand {
 		if handCard.Suit == c.Suit && handCard.Rank == c.Rank {
 			return true
 		}
 	}
+
 	return false
 }
 
 // validateBid checks if the bid is valid
-// Payload expected: Bid struct
-func (g *GameState) validateBid(p *Player, payload interface{}) error {
+// Payload expected: Bid struct.
+func (g *Game) validateBid(p *Player, payload any) error {
 	if g.Status != PhaseBidding {
 		return fmt.Errorf("%w: not in bidding phase", ErrInvalidMove)
 	}
 
 	bid, ok := payload.(Bid)
 	if !ok {
-		return fmt.Errorf("invalid payload for bid")
+		return errors.New("invalid payload for bid")
 	}
 
 	// Must be this player's turn to bid?
@@ -99,6 +109,7 @@ func (g *GameState) validateBid(p *Player, payload interface{}) error {
 	if bid.Points < 3 || bid.Points > 10 {
 		return fmt.Errorf("%w: bid points must be between 3 and 10", ErrInvalidMove)
 	}
+
 	if bid.IsNoTrump {
 		if bid.Suit != None {
 			return fmt.Errorf("%w: no-trump bids must use suit 'none'", ErrInvalidMove)
@@ -114,13 +125,16 @@ func (g *GameState) validateBid(p *Player, payload interface{}) error {
 		if bid.Points < g.CurrentBid.Points {
 			return fmt.Errorf("%w: bid must be higher", ErrInvalidMove)
 		}
+
 		if bid.Points == g.CurrentBid.Points {
 			if g.CurrentBid.IsNoTrump && bid.IsNoTrump {
 				return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
 			}
+
 			if g.CurrentBid.IsNoTrump && !bid.IsNoTrump {
 				return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
 			}
+
 			if !bid.IsNoTrump && !g.CurrentBid.IsNoTrump {
 				if suitRank[bid.Suit] <= suitRank[g.CurrentBid.Suit] {
 					return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
@@ -132,30 +146,34 @@ func (g *GameState) validateBid(p *Player, payload interface{}) error {
 	return nil
 }
 
-func (g *GameState) validatePass(p *Player) error {
+func (g *Game) validatePass(p *Player) error {
 	if g.Status != PhaseBidding {
 		return fmt.Errorf("%w: not in bidding phase", ErrInvalidMove)
 	}
+
 	if g.Players[g.CurrentTurn].ID != p.ID {
 		return fmt.Errorf("%w: not your turn to pass", ErrInvalidMove)
 	}
+
 	return nil
 }
 
 // validateDiscard
-// Payload: []Card (3 cards)
-func (g *GameState) validateDiscard(p *Player, payload interface{}) error {
+// Payload: []Card (3 cards).
+func (g *Game) validateDiscard(p *Player, payload any) error {
 	if g.Status != PhaseExchanging {
 		return fmt.Errorf("%w: not in exchanging phase", ErrInvalidMove)
 	}
+
 	if g.Players[g.Declarer].ID != p.ID {
 		return fmt.Errorf("%w: only declarer can discard", ErrInvalidMove)
 	}
 
 	cards, ok := payload.([]Card)
 	if !ok {
-		return fmt.Errorf("invalid payload for discard")
+		return errors.New("invalid payload for discard")
 	}
+
 	if len(cards) != 3 {
 		return fmt.Errorf("%w: must discard exactly 3 cards", ErrInvalidMove)
 	}
@@ -167,15 +185,17 @@ func (g *GameState) validateDiscard(p *Player, payload interface{}) error {
 			return fmt.Errorf("%w: do not hold card %s", ErrInvalidMove, c)
 		}
 	}
+
 	return nil
 }
 
 // validateCallPartner
-// Payload: Card (the partner card)
-func (g *GameState) validateCallPartner(p *Player, payload interface{}) error {
+// Payload: Card (the partner card).
+func (g *Game) validateCallPartner(p *Player, payload any) error {
 	if g.Status != PhaseCalling {
 		return fmt.Errorf("%w: not in calling phase", ErrInvalidMove)
 	}
+
 	if g.Players[g.Declarer].ID != p.ID {
 		return fmt.Errorf("%w: only declarer call partner", ErrInvalidMove)
 	}
@@ -184,18 +204,19 @@ func (g *GameState) validateCallPartner(p *Player, payload interface{}) error {
 	// It's just a card.
 	_, ok := payload.(Card)
 	if !ok {
-		return fmt.Errorf("invalid payload for partner call")
+		return errors.New("invalid payload for partner call")
 	}
 
 	return nil
 }
 
 // validatePlayCard
-// Payload: PlayCardMove
-func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
+// Payload: PlayCardMove.
+func (g *Game) validatePlayCard(p *Player, payload any) error {
 	if g.Status != PhasePlaying {
 		return fmt.Errorf("%w: not in playing phase", ErrInvalidMove)
 	}
+
 	if g.Players[g.CurrentTurn].ID != p.ID {
 		return fmt.Errorf("%w: not your turn", ErrInvalidMove)
 	}
@@ -205,8 +226,9 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 		// Fallback for simple Card payload if necessary, but we prefer PlayCardMove
 		card, ok := payload.(Card)
 		if !ok {
-			return fmt.Errorf("invalid payload for play card")
+			return errors.New("invalid payload for play card")
 		}
+
 		move = PlayCardMove{Card: card}
 	}
 
@@ -218,8 +240,9 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 	// Trick Validation Logic
 	currentTrickIdx := len(g.Tricks) - 1
 	if currentTrickIdx < 0 {
-		return fmt.Errorf("no active trick")
+		return errors.New("no active trick")
 	}
+
 	t := g.Tricks[currentTrickIdx]
 
 	// 1. Forced Play (Joker Called)
@@ -268,6 +291,7 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 					return fmt.Errorf("%w: cannot play mighty on first trick if you can follow suit", ErrInvalidMove)
 				}
 			}
+
 			return nil
 		}
 
@@ -282,42 +306,51 @@ func (g *GameState) validatePlayCard(p *Player, payload interface{}) error {
 
 // Helpers
 
-func (g *GameState) IsMighty(c Card) bool {
+// IsMighty checks if a card is the Mighty card given the current trump suit.
+func (g *Game) IsMighty(c Card) bool {
 	// Usually Ace of Spades.
 	// If Spades is Trump, Ace of Clubs is Mighty.
 	if g.Trump == Spades {
 		return c.Suit == Clubs && c.Rank == Ace
 	}
+
 	return c.Suit == Spades && c.Rank == Ace
 }
 
-func (g *GameState) IsJokerCaller(c Card) bool {
+// IsJokerCaller checks if a card is the Joker Caller card given the current trump suit.
+func (g *Game) IsJokerCaller(c Card) bool {
 	// Usually Three of Clubs.
 	// If Clubs is Trump, Three of Spades is Joker Caller.
 	if g.Trump == Clubs {
 		return c.Suit == Spades && c.Rank == Three
 	}
+
 	return c.Suit == Clubs && c.Rank == Three
 }
 
+// HasRank checks if a player has a card of the specified rank in their hand.
 func (p *Player) HasRank(r Rank) bool {
 	for _, c := range p.Hand {
 		if c.Rank == r {
 			return true
 		}
 	}
+
 	return false
 }
 
+// HasSuit checks if a player has a card of the specified suit in their hand.
 func (p *Player) HasSuit(s Suit) bool {
 	for _, c := range p.Hand {
 		if c.Suit == s {
 			return true
 		}
 	}
+
 	return false
 }
 
+// HasNonTrump checks if a player has any non-trump cards in their hand.
 func (p *Player) HasNonTrump(trump Suit) bool {
 	for _, c := range p.Hand {
 		if c.Suit != trump && c.Rank != Joker {
@@ -327,17 +360,22 @@ func (p *Player) HasNonTrump(trump Suit) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 // ApplyMove applies the move to the game state
-// Assumes ValidateMove has already been called
-func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interface{}) error {
+// Assumes ValidateMove has already been called.
+func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error {
 	p := g.GetPlayer(playerID)
 
 	switch moveType {
 	case MoveBid:
-		bid := payload.(Bid)
+		bid, ok := payload.(Bid)
+		if !ok {
+			return errors.New("invalid payload for bid")
+		}
+
 		bid.PlayerID = playerID // Ensure playerID is set
 
 		// If pass
@@ -348,7 +386,7 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 			}
 		} else {
 			g.CurrentBid = &bid
-			g.Declarer = p.Seat // Potential declarer
+			g.Declarer = p.Seat                  // Potential declarer
 			g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
 		}
 		// In rotation, move turn to next player?
@@ -379,27 +417,32 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 		}
 
 	case MoveDiscard:
-		cards := payload.([]Card)
+		cards, ok := payload.([]Card)
+		if !ok {
+			return errors.New("invalid payload for discard")
+		}
+
 		// Remove cards from hand
 		newHand := []Card{}
 		discardPoints := []Card{}
 
 		for _, c := range p.Hand {
 			isDiscarded := false
+
 			for _, dc := range cards {
 				if c.Suit == dc.Suit && c.Rank == dc.Rank {
 					isDiscarded = true
 					break
 				}
 			}
+
 			if !isDiscarded {
 				newHand = append(newHand, c)
-			} else {
-				if c.IsPointCard() {
-					discardPoints = append(discardPoints, c)
-				}
+			} else if c.IsPointCard() {
+				discardPoints = append(discardPoints, c)
 			}
 		}
+
 		p.Hand = newHand
 		// Declarer gets points from discard?
 		// "May score points from discarded scoring cards"
@@ -408,7 +451,11 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 		g.Status = PhaseCalling
 
 	case MoveCallPartner:
-		card := payload.(Card)
+		card, ok := payload.(Card)
+		if !ok {
+			return errors.New("invalid payload for call partner")
+		}
+
 		g.PartnerCard = &card
 		g.Status = PhasePlaying
 		// Start playing
@@ -419,19 +466,26 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 		move, ok := payload.(PlayCardMove)
 		if !ok {
 			// Fallback for Card payload
-			card, _ := payload.(Card)
+			card, ok := payload.(Card)
+			if !ok {
+				return errors.New("invalid payload for play card")
+			}
 			move = PlayCardMove{Card: card}
 		}
+
 		card := move.Card
 
 		// Remove from hand
 		newHand := []Card{}
+
 		for _, c := range p.Hand {
 			if c.Suit == card.Suit && c.Rank == card.Rank {
 				continue
 			}
+
 			newHand = append(newHand, c)
 		}
+
 		p.Hand = newHand
 
 		// Add to trick
@@ -477,6 +531,7 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 			if len(g.Tricks) == 10 {
 				g.Status = PhaseFinished
 				declarerScore, partnerScore := g.CalculateFinalScore()
+
 				g.Scores = make(map[string]int, len(g.Players))
 				for _, player := range g.Players {
 					if player != nil {
@@ -488,6 +543,7 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 				if g.Declarer >= 0 && g.Declarer < len(g.Players) && g.Players[g.Declarer] != nil {
 					g.Scores[g.Players[g.Declarer].ID] = int(declarerScore)
 				}
+
 				if g.PartnerSeat >= 0 && g.PartnerSeat < len(g.Players) && g.Players[g.PartnerSeat] != nil {
 					g.Scores[g.Players[g.PartnerSeat].ID] = int(partnerScore)
 				}
@@ -503,8 +559,8 @@ func (g *GameState) ApplyMove(playerID string, moveType MoveType, payload interf
 	return nil
 }
 
-// ResolveTrick determines the winner and points
-func (g *GameState) ResolveTrick(t Trick) (int, []Card) {
+// ResolveTrick determines the winner and points.
+func (g *Game) ResolveTrick(t Trick) (int, []Card) {
 	winnerIdx := 0
 	maxPower := -1
 	points := []Card{}
@@ -527,8 +583,8 @@ func (g *GameState) ResolveTrick(t Trick) (int, []Card) {
 	return t.Cards[winnerIdx].Seat, points
 }
 
-// CalculatePower determines the contextual strength of a card
-func (g *GameState) CalculatePower(c Card, t Trick, trickNum int) int {
+// CalculatePower determines the contextual strength of a card.
+func (g *Game) CalculatePower(c Card, t Trick, trickNum int) int {
 	// 1. Mighty beats everything
 	if g.IsMighty(c) {
 		return PowerMighty
@@ -551,6 +607,7 @@ func (g *GameState) CalculatePower(c Card, t Trick, trickNum int) int {
 				return PowerBase
 			}
 		}
+
 		return PowerJoker
 	}
 
@@ -568,20 +625,21 @@ func (g *GameState) CalculatePower(c Card, t Trick, trickNum int) int {
 	return PowerBase + RankValue(c.Rank)
 }
 
-// Beats returns true if c1 beats c2
-func (g *GameState) Beats(c1, c2 Card, t Trick) bool {
+// Beats returns true if c1 beats c2.
+func (g *Game) Beats(c1, c2 Card, t Trick) bool {
 	trickNum := len(g.Tricks)
 	return g.CalculatePower(c1, t, trickNum) > g.CalculatePower(c2, t, trickNum)
 }
 
-// CalculateFinalScore calculates the final points for the declarer and friend
-func (g *GameState) CalculateFinalScore() (float64, float64) {
+// CalculateFinalScore calculates the final points for the declarer and friend.
+func (g *Game) CalculateFinalScore() (float64, float64) {
 	if g.Contract == nil {
 		return 0, 0
 	}
 
 	// Let's count tricks won by the caller team
 	tricksWon := 0
+
 	for _, t := range g.Tricks {
 		if t.Winner == g.Declarer || t.Winner == g.PartnerSeat {
 			tricksWon++
@@ -611,9 +669,11 @@ func (g *GameState) CalculateFinalScore() (float64, float64) {
 	if g.Contract.IsNoTrump {
 		score *= 2
 	}
+
 	if g.IsNoFriend {
 		score *= 2
 	}
+
 	if contractGoal == 10 {
 		score *= 2
 	}
@@ -622,6 +682,7 @@ func (g *GameState) CalculateFinalScore() (float64, float64) {
 	if score > 800 {
 		score = 800
 	}
+
 	if score < -800 {
 		score = -800
 	}
@@ -634,6 +695,7 @@ func (g *GameState) CalculateFinalScore() (float64, float64) {
 	return score, friendScore
 }
 
+// RankValue returns the numerical value of a rank for comparison.
 func RankValue(r Rank) int {
 	switch r {
 	case Ace:
@@ -662,6 +724,8 @@ func RankValue(r Rank) int {
 		return 3
 	case Two:
 		return 2
+	case Joker:
+		return 0 // Joker value handled separately by power logic
 	default:
 		return 0
 	}

@@ -13,8 +13,9 @@ import (
 	"time"
 )
 
-// TestLoggingResponseWriter_WriteHeader tests that WriteHeader properly sets the status code
+// TestLoggingResponseWriter_WriteHeader tests that WriteHeader properly sets the status code.
 func TestLoggingResponseWriter_WriteHeader(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		statusCode int
@@ -28,6 +29,7 @@ func TestLoggingResponseWriter_WriteHeader(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			rec := httptest.NewRecorder()
 			lrw := &LoggingResponseWriter{ResponseWriter: rec}
 
@@ -36,9 +38,11 @@ func TestLoggingResponseWriter_WriteHeader(t *testing.T) {
 			if lrw.responseCode != tt.statusCode {
 				t.Errorf("Expected responseCode %d, got %d", tt.statusCode, lrw.responseCode)
 			}
+
 			if !lrw.wroteHeader {
 				t.Error("Expected wroteHeader to be true")
 			}
+
 			if rec.Code != tt.statusCode {
 				t.Errorf("Expected underlying ResponseWriter code %d, got %d", tt.statusCode, rec.Code)
 			}
@@ -46,8 +50,9 @@ func TestLoggingResponseWriter_WriteHeader(t *testing.T) {
 	}
 }
 
-// TestLoggingResponseWriter_Write tests that Write method properly handles implicit status codes
+// TestLoggingResponseWriter_Write tests that Write method properly handles implicit status codes.
 func TestLoggingResponseWriter_Write(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name               string
 		writeData          string
@@ -75,6 +80,7 @@ func TestLoggingResponseWriter_Write(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			rec := httptest.NewRecorder()
 			lrw := &LoggingResponseWriter{ResponseWriter: rec}
 
@@ -88,6 +94,7 @@ func TestLoggingResponseWriter_Write(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Write failed: %v", err)
 			}
+
 			if n != len(tt.writeData) {
 				t.Errorf("Expected to write %d bytes, wrote %d", len(tt.writeData), n)
 			}
@@ -96,6 +103,7 @@ func TestLoggingResponseWriter_Write(t *testing.T) {
 			if lrw.responseCode != tt.expectedCode {
 				t.Errorf("Expected responseCode %d, got %d", tt.expectedCode, lrw.responseCode)
 			}
+
 			if !lrw.wroteHeader {
 				t.Error("Expected wroteHeader to be true after Write")
 			}
@@ -104,6 +112,7 @@ func TestLoggingResponseWriter_Write(t *testing.T) {
 			if rec.Code != tt.expectedCode {
 				t.Errorf("Expected underlying ResponseWriter code %d, got %d", tt.expectedCode, rec.Code)
 			}
+
 			if rec.Body.String() != tt.writeData {
 				t.Errorf("Expected body %q, got %q", tt.writeData, rec.Body.String())
 			}
@@ -111,19 +120,22 @@ func TestLoggingResponseWriter_Write(t *testing.T) {
 	}
 }
 
-// TestLoggingResponseWriter_MultipleWrites tests that multiple Write calls work correctly
+// TestLoggingResponseWriter_MultipleWrites tests that multiple Write calls work correctly.
 func TestLoggingResponseWriter_MultipleWrites(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	lrw := &LoggingResponseWriter{ResponseWriter: rec}
 
 	// First write should set implicit 200
-	lrw.Write([]byte("Hello "))
+	_, _ = lrw.Write([]byte("Hello "))
+
 	if lrw.responseCode != http.StatusOK {
 		t.Errorf("Expected responseCode 200 after first write, got %d", lrw.responseCode)
 	}
 
 	// Second write should not change the status
-	lrw.Write([]byte("World"))
+	_, _ = lrw.Write([]byte("World"))
+
 	if lrw.responseCode != http.StatusOK {
 		t.Errorf("Expected responseCode 200 after second write, got %d", lrw.responseCode)
 	}
@@ -133,8 +145,9 @@ func TestLoggingResponseWriter_MultipleWrites(t *testing.T) {
 	}
 }
 
-// TestLoggingMiddleware tests the logging middleware with various response scenarios
+// TestLoggingMiddleware tests the logging middleware with various response scenarios.
 func TestLoggingMiddleware(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		handler       http.HandlerFunc
@@ -146,7 +159,7 @@ func TestLoggingMiddleware(t *testing.T) {
 			name: "SuccessfulResponse",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 			},
 			expectedCode: http.StatusOK,
 			expectedBody: `{"status":"ok"}`,
@@ -155,7 +168,7 @@ func TestLoggingMiddleware(t *testing.T) {
 			name: "ExplicitCreatedStatus",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusCreated)
-				w.Write([]byte("created"))
+				_, _ = w.Write([]byte("created"))
 			},
 			expectedCode: http.StatusCreated,
 			expectedBody: "created",
@@ -193,7 +206,7 @@ func TestLoggingMiddleware(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(50 * time.Millisecond)
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("slow"))
+				_, _ = w.Write([]byte("slow"))
 			},
 			expectedCode:  http.StatusOK,
 			expectedBody:  "slow",
@@ -203,11 +216,12 @@ func TestLoggingMiddleware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Create a test handler wrapped with logging middleware
 			wrapped := LoggingMiddleware(tt.handler)
 
 			// Create test request
-			req := httptest.NewRequest(http.MethodPost, "/test", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", nil)
 			rec := httptest.NewRecorder()
 
 			// Capture start time for duration check
@@ -224,6 +238,7 @@ func TestLoggingMiddleware(t *testing.T) {
 			// Check body if specified
 			if tt.expectedBody != "" {
 				body := strings.TrimSpace(rec.Body.String())
+
 				expectedBody := strings.TrimSpace(tt.expectedBody)
 				if !strings.Contains(body, expectedBody) {
 					t.Errorf("Expected body to contain %q, got %q", expectedBody, body)
@@ -241,11 +256,12 @@ func TestLoggingMiddleware(t *testing.T) {
 	}
 }
 
-// TestLoggingMiddleware_RequestDetails tests that request details are properly logged
+// TestLoggingMiddleware_RequestDetails tests that request details are properly logged.
 func TestLoggingMiddleware_RequestDetails(t *testing.T) {
+	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	wrapped := LoggingMiddleware(handler)
@@ -278,7 +294,8 @@ func TestLoggingMiddleware_RequestDetails(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.path, tt.body)
+			t.Parallel()
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, tt.body)
 			rec := httptest.NewRecorder()
 
 			wrapped.ServeHTTP(rec, req)
@@ -291,18 +308,19 @@ func TestLoggingMiddleware_RequestDetails(t *testing.T) {
 	}
 }
 
-// TestLoggingMiddleware_PreservesHeaders tests that middleware preserves response headers
+// TestLoggingMiddleware_PreservesHeaders tests that middleware preserves response headers.
 func TestLoggingMiddleware_PreservesHeaders(t *testing.T) {
+	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Custom-Header", "test-value")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
 	wrapped := LoggingMiddleware(handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
 	rec := httptest.NewRecorder()
 
 	wrapped.ServeHTTP(rec, req)
@@ -311,18 +329,21 @@ func TestLoggingMiddleware_PreservesHeaders(t *testing.T) {
 	if rec.Header().Get("Content-Type") != "application/json" {
 		t.Errorf("Content-Type header not preserved")
 	}
+
 	if rec.Header().Get("X-Custom-Header") != "test-value" {
 		t.Errorf("Custom header not preserved")
 	}
 }
 
-// TestLoggingResponseWriter_WriteHeaderOnlyOnce tests that WriteHeader only tracks the first call
+// TestLoggingResponseWriter_WriteHeaderOnlyOnce tests that WriteHeader only tracks the first call.
 func TestLoggingResponseWriter_WriteHeaderOnlyOnce(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	lrw := &LoggingResponseWriter{ResponseWriter: rec}
 
 	// First call
 	lrw.WriteHeader(http.StatusOK)
+
 	if lrw.responseCode != http.StatusOK {
 		t.Errorf("Expected responseCode 200, got %d", lrw.responseCode)
 	}
@@ -341,8 +362,9 @@ func TestLoggingResponseWriter_WriteHeaderOnlyOnce(t *testing.T) {
 	}
 }
 
-// TestLoggingMiddleware_NoWriteCalls tests that middleware handles cases where neither WriteHeader nor Write is called
+// TestLoggingMiddleware_NoWriteCalls tests that middleware handles cases where neither WriteHeader nor Write is called.
 func TestLoggingMiddleware_NoWriteCalls(t *testing.T) {
+	t.Parallel()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Don't call WriteHeader or Write - some handlers might just set headers
 		// or do nothing
@@ -350,7 +372,7 @@ func TestLoggingMiddleware_NoWriteCalls(t *testing.T) {
 
 	wrapped := LoggingMiddleware(handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
 	rec := httptest.NewRecorder()
 
 	wrapped.ServeHTTP(rec, req)
@@ -361,9 +383,11 @@ func TestLoggingMiddleware_NoWriteCalls(t *testing.T) {
 	}
 }
 
-// TestLoggingResponseWriter_Hijack tests that Hijack properly delegates to underlying ResponseWriter
+// TestLoggingResponseWriter_Hijack tests that Hijack properly delegates to underlying ResponseWriter.
 func TestLoggingResponseWriter_Hijack(t *testing.T) {
+	t.Parallel()
 	t.Run("Hijack not supported", func(t *testing.T) {
+		t.Parallel()
 		// httptest.ResponseRecorder does not support hijacking
 		rec := httptest.NewRecorder()
 		lrw := &LoggingResponseWriter{ResponseWriter: rec}
@@ -372,12 +396,14 @@ func TestLoggingResponseWriter_Hijack(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error when Hijack is not supported")
 		}
+
 		if err.Error() != "hijack not supported" {
 			t.Errorf("Expected 'hijack not supported' error, got %v", err)
 		}
 	})
 
 	t.Run("Hijack supported", func(t *testing.T) {
+		t.Parallel()
 		// Create a mock ResponseWriter that implements http.Hijacker
 		mockHijacker := &mockHijackerResponseWriter{}
 		lrw := &LoggingResponseWriter{ResponseWriter: mockHijacker}
@@ -386,19 +412,22 @@ func TestLoggingResponseWriter_Hijack(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
+
 		if !mockHijacker.hijackCalled {
 			t.Error("Expected Hijack to be called on underlying ResponseWriter")
 		}
+
 		if conn == nil {
 			t.Error("Expected non-nil connection")
 		}
+
 		if rw == nil {
 			t.Error("Expected non-nil ReadWriter")
 		}
 	})
 }
 
-// mockHijackerResponseWriter is a mock ResponseWriter that implements http.Hijacker
+// mockHijackerResponseWriter is a mock ResponseWriter that implements http.Hijacker.
 type mockHijackerResponseWriter struct {
 	hijackCalled bool
 }
@@ -411,7 +440,7 @@ func (m *mockHijackerResponseWriter) Write([]byte) (int, error) {
 	return 0, nil
 }
 
-func (m *mockHijackerResponseWriter) WriteHeader(statusCode int) {}
+func (m *mockHijackerResponseWriter) WriteHeader(_ int) {}
 
 func (m *mockHijackerResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	m.hijackCalled = true
@@ -419,14 +448,14 @@ func (m *mockHijackerResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, erro
 	return &mockConn{}, bufio.NewReadWriter(bufio.NewReader(nil), bufio.NewWriter(nil)), nil
 }
 
-// mockConn is a minimal implementation of net.Conn for testing
+// mockConn is a minimal implementation of net.Conn for testing.
 type mockConn struct{}
 
-func (m *mockConn) Read(b []byte) (n int, err error)   { return 0, nil }
-func (m *mockConn) Write(b []byte) (n int, err error)  { return 0, nil }
+func (m *mockConn) Read(_ []byte) (n int, err error)   { return 0, nil }
+func (m *mockConn) Write(_ []byte) (n int, err error)  { return 0, nil }
 func (m *mockConn) Close() error                       { return nil }
 func (m *mockConn) LocalAddr() net.Addr                { return nil }
 func (m *mockConn) RemoteAddr() net.Addr               { return nil }
-func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
-func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
-func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
+func (m *mockConn) SetDeadline(_ time.Time) error      { return nil }
+func (m *mockConn) SetReadDeadline(_ time.Time) error  { return nil }
+func (m *mockConn) SetWriteDeadline(_ time.Time) error { return nil }

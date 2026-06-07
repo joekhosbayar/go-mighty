@@ -45,7 +45,7 @@ Once connected, send the authentication payload within 5 seconds:
 
 ## 🧪 Testing
 - **Unit Tests**: `go test ./internal/...`
-- **E2E Gherkin Features**: `go test -v ./tests/e2e/...`
+- **E2E Gherkin Features**: `go test -v -tags=integration ./tests/e2e/...`
 
 ## 📘 Documentation
 - [API Reference](./docs/API_DOCUMENTATION.md)

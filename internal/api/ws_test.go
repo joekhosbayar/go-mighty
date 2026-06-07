@@ -20,6 +20,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	keyType     = "type"
+	keyMoveType = "move_type"
+)
+
 type fakeWSGameService struct {
 	mu                sync.Mutex
 	redisClient       *redis.Client
@@ -28,18 +33,19 @@ type fakeWSGameService struct {
 	processMoveErr    error
 }
 
-func (f *fakeWSGameService) CreateGame(ctx context.Context, id string) (*game.GameState, error) {
+func (f *fakeWSGameService) CreateGame(_ context.Context, _ string) (*game.Game, error) {
 	return nil, nil
 }
 
-func (f *fakeWSGameService) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.GameState, error) {
+func (f *fakeWSGameService) JoinGame(_ context.Context, _, _, _ string) (*game.Game, error) {
 	return nil, nil
 }
 
-func (f *fakeWSGameService) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.GameState, error) {
+func (f *fakeWSGameService) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, _ any, clientVersion int64) (*game.Game, error) {
 	f.mu.Lock()
 	f.processMoveCalled = true
 	f.mu.Unlock()
+
 	select {
 	case f.processMoveCh <- struct{}{}:
 	default:
@@ -49,13 +55,14 @@ func (f *fakeWSGameService) ProcessMove(ctx context.Context, gameID, playerID st
 		return nil, f.processMoveErr
 	}
 
-	event := map[string]interface{}{
-		"type":       "move",
-		"move_type":  moveType,
+	event := map[string]any{
+		keyType:      "move",
+		keyMoveType:  moveType,
 		"player_id":  playerID,
 		"version":    clientVersion + 1,
 		"game_state": map[string]string{"id": gameID},
 	}
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		return nil, err
@@ -65,24 +72,25 @@ func (f *fakeWSGameService) ProcessMove(ctx context.Context, gameID, playerID st
 		return nil, err
 	}
 
-	return &game.GameState{ID: gameID}, nil
+	return &game.Game{ID: gameID}, nil
 }
 
 func (f *fakeWSGameService) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
 	return f.redisClient.Subscribe(ctx, "game:"+gameID+":events")
 }
 
-func (f *fakeWSGameService) GetGame(ctx context.Context, gameID string) (*game.GameState, error) {
+func (_ *fakeWSGameService) GetGame(_ context.Context, _ string) (*game.Game, error) {
 	return nil, nil
 }
 
-func (f *fakeWSGameService) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error) {
+func (_ *fakeWSGameService) ListGamesByStatus(_ context.Context, _ game.Phase) ([]*game.Game, error) {
 	return nil, nil
 }
 
 func (f *fakeWSGameService) WasProcessMoveCalled() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	return f.processMoveCalled
 }
 
@@ -105,11 +113,11 @@ func setupWSTestHandler(t *testing.T) (*Handler, func()) {
 		redisClient:   client,
 		processMoveCh: make(chan struct{}, 1),
 	}
-	authSvc := service.NewAuthService(&postgres.Store{}, "testsecret")
+	authSvc := service.NewAuth(&postgres.Store{}, "testsecret")
 	handler := NewHandler(svc, authSvc)
 
 	cleanup := func() {
-		client.Close()
+		_ = client.Close()
 		mini.Close()
 	}
 
@@ -139,6 +147,7 @@ func setupWSTestServer(t *testing.T) (*httptest.Server, *fakeWSGameService) {
 // TestWSHandler_RejectEarlyData confirms that the server rejects a WebSocket handshake
 // if the client sends data before the handshake is complete.
 func TestWSHandler_RejectEarlyData(t *testing.T) {
+	t.Parallel()
 	server, _ := setupWSTestServer(t)
 
 	_, port, err := net.SplitHostPort(server.Listener.Addr().String())
@@ -146,11 +155,12 @@ func TestWSHandler_RejectEarlyData(t *testing.T) {
 		t.Fatalf("Failed to split host/port: %v", err)
 	}
 
-	conn, err := net.Dial("tcp", "localhost:"+port)
+	var d net.Dialer
+	conn, err := d.DialContext(t.Context(), "tcp", "localhost:"+port)
 	if err != nil {
 		t.Fatalf("Failed to dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	req := "GET /games/test-game/ws HTTP/1.1\r\n" +
 		"Host: localhost:" + port + "\r\n" +
@@ -166,37 +176,46 @@ func TestWSHandler_RejectEarlyData(t *testing.T) {
 	if _, err = conn.Write([]byte(req)); err != nil {
 		t.Fatalf("Failed to write request: %v", err)
 	}
+
 	if _, err = conn.Write(extraData); err != nil {
 		t.Fatalf("Failed to write extra data: %v", err)
 	}
 
 	reader := bufio.NewReader(conn)
+
 	resp, err := http.ReadResponse(reader, nil)
 	if err == nil {
 		if resp.StatusCode == http.StatusSwitchingProtocols {
 			t.Errorf("Expected handshake failure, got 101 Switching Protocols")
 		}
-		resp.Body.Close()
+
+		_ = resp.Body.Close()
 	}
 }
 
-func dialWS(t *testing.T, server *httptest.Server, path string, token string) *websocketConn {
+func dialWS(t *testing.T, server *httptest.Server, path, token string) *websocketConn {
 	t.Helper()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + path
 
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+
 	if err != nil {
 		if resp != nil {
 			t.Fatalf("websocket dial failed: %v (status=%d)", err, resp.StatusCode)
 		}
+
 		t.Fatalf("websocket dial failed: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+
+	t.Cleanup(func() { _ = conn.Close() })
 
 	if token != "" {
 		authMsg := map[string]string{
-			"type":  "AUTH",
+			keyType: "AUTH",
 			"token": token,
 		}
 		if err := conn.WriteJSON(authMsg); err != nil {
@@ -208,6 +227,7 @@ func dialWS(t *testing.T, server *httptest.Server, path string, token string) *w
 }
 
 func TestWSHandler_InvalidJSONReturnsErrorFrame(t *testing.T) {
+	t.Parallel()
 	server, _ := setupWSTestServer(t)
 	token := generateValidToken("user-1", "alice")
 	conn := dialWS(t, server, "/games/game-1/ws", token)
@@ -217,18 +237,19 @@ func TestWSHandler_InvalidJSONReturnsErrorFrame(t *testing.T) {
 	}
 
 	msg := conn.ReadText(t)
-	if msg.Type != "ERROR" || !strings.Contains(msg.Error, "invalid message format") {
+	if msg.Type != WSMessageTypeError || !strings.Contains(msg.Error, "invalid message format") {
 		t.Fatalf("unexpected ws error response: %+v", msg)
 	}
 }
 
 func TestWSHandler_FirstMessageMustBeAuth(t *testing.T) {
+	t.Parallel()
 	server, _ := setupWSTestServer(t)
 	conn := dialWS(t, server, "/games/game-1/ws", "")
 
-	if err := conn.WriteJSON(map[string]interface{}{
-		"type":           "MOVE",
-		"move_type":      "pass",
+	if err := conn.WriteJSON(map[string]any{
+		keyType:          WSMessageTypeMove,
+		keyMoveType:      "pass",
 		"payload":        nil,
 		"client_version": 1,
 	}); err != nil {
@@ -236,19 +257,20 @@ func TestWSHandler_FirstMessageMustBeAuth(t *testing.T) {
 	}
 
 	msg := conn.ReadText(t)
-	if msg.Type != "ERROR" || !strings.Contains(msg.Error, "expected AUTH message") {
+	if msg.Type != WSMessageTypeError || !strings.Contains(msg.Error, "expected AUTH message") {
 		t.Fatalf("unexpected ws error response: %+v", msg)
 	}
 }
 
 func TestWSHandler_InvalidMovePayloadReturnsErrorFrame(t *testing.T) {
+	t.Parallel()
 	server, _ := setupWSTestServer(t)
 	token := generateValidToken("user-1", "alice")
 	conn := dialWS(t, server, "/games/game-1/ws", token)
 
-	if err := conn.WriteJSON(map[string]interface{}{
-		"type":           "MOVE",
-		"move_type":      "bid",
+	if err := conn.WriteJSON(map[string]any{
+		keyType:          WSMessageTypeMove,
+		keyMoveType:      "bid",
 		"payload":        "bad-payload",
 		"client_version": 1,
 	}); err != nil {
@@ -256,19 +278,20 @@ func TestWSHandler_InvalidMovePayloadReturnsErrorFrame(t *testing.T) {
 	}
 
 	msg := conn.ReadText(t)
-	if msg.Type != "ERROR" || !strings.Contains(msg.Error, "invalid payload structure") {
+	if msg.Type != WSMessageTypeError || !strings.Contains(msg.Error, "invalid payload structure") {
 		t.Fatalf("unexpected ws error response: %+v", msg)
 	}
 }
 
 func TestWSHandler_ValidMoveCallsProcessMoveAndForwardsEvent(t *testing.T) {
+	t.Parallel()
 	server, svc := setupWSTestServer(t)
 	token := generateValidToken("user-2", "bob")
 	conn := dialWS(t, server, "/games/game-1/ws", token)
 
-	if err := conn.WriteJSON(map[string]interface{}{
-		"type":           "MOVE",
-		"move_type":      "pass",
+	if err := conn.WriteJSON(map[string]any{
+		keyType:          WSMessageTypeMove,
+		keyMoveType:      "pass",
 		"payload":        nil,
 		"client_version": 3,
 	}); err != nil {
@@ -298,39 +321,47 @@ func (c *websocketConn) WriteText(msg string) error {
 	return c.Conn.WriteMessage(websocket.TextMessage, []byte(msg))
 }
 
-func (c *websocketConn) WriteJSON(v interface{}) error {
+func (c *websocketConn) WriteJSON(v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
+
 	return c.Conn.WriteMessage(websocket.TextMessage, data)
 }
 
 func (c *websocketConn) ReadText(t *testing.T) wsErrorMessage {
 	t.Helper()
+
 	if err := c.setReadDeadline(2 * time.Second); err != nil {
 		t.Fatalf("failed to set websocket read deadline: %v", err)
 	}
+
 	_, data, err := c.Conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("failed to read websocket message: %v", err)
 	}
+
 	var msg wsErrorMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		t.Fatalf("failed to decode websocket error message: %v (%s)", err, string(data))
 	}
+
 	return msg
 }
 
 func (c *websocketConn) ReadRawText(t *testing.T) string {
 	t.Helper()
+
 	if err := c.setReadDeadline(2 * time.Second); err != nil {
 		t.Fatalf("failed to set websocket read deadline: %v", err)
 	}
+
 	_, data, err := c.Conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("failed to read websocket message: %v", err)
 	}
+
 	return string(data)
 }
 

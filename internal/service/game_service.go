@@ -1,3 +1,5 @@
+// Package service provides the business logic for the Mighty application, including
+// authentication and game management services.
 package service
 
 import (
@@ -13,36 +15,42 @@ import (
 )
 
 var (
+	// ErrRedisStoreNotInitialized is returned when the Redis store is not available.
 	ErrRedisStoreNotInitialized = errors.New("redis store not initialized")
-	ErrGameNotFound             = errors.New("game not found")
-	ErrGameFull                 = errors.New("game is full")
+	// ErrGameNotFound is returned when a requested game does not exist.
+	ErrGameNotFound = errors.New("game not found")
+	// ErrGameFull is returned when a player attempts to join a game that already has 5 players.
+	ErrGameFull = errors.New("game is full")
 )
 
+// RedisStore defines the interface for hot state storage of games in Redis.
 type RedisStore interface {
-	SaveGame(ctx context.Context, g *game.GameState) error
-	LoadGame(ctx context.Context, gameID string) (*game.GameState, error)
+	SaveGame(ctx context.Context, g *game.Game) error
+	LoadGame(ctx context.Context, gameID string) (*game.Game, error)
 	AcquireLock(ctx context.Context, gameID string) (bool, error)
 	ReleaseLock(ctx context.Context, gameID string) error
 	CheckVersion(ctx context.Context, gameID string, clientVersion int64) error
-	PublishEvent(ctx context.Context, gameID string, event interface{}) error
+	PublishEvent(ctx context.Context, gameID string, event any) error
 	Subscribe(ctx context.Context, gameID string) *redis.PubSub
 }
 
-type GameService struct {
+// Game service manages game lifecycle, including creation, joining, and move processing.
+type Game struct {
 	redisStore    RedisStore
 	postgresStore *postgres.Store
 }
 
-func NewGameService(r RedisStore, p *postgres.Store) *GameService {
-	return &GameService{
+// NewGame creates and returns a new Game service instance.
+func NewGame(r RedisStore, p *postgres.Store) *Game {
+	return &Game{
 		redisStore:    r,
 		postgresStore: p,
 	}
 }
 
-// CreateGame initializes a new game
-func (s *GameService) CreateGame(ctx context.Context, id string) (*game.GameState, error) {
-	g := game.NewGame(id)
+// CreateGame initializes a new game and persists it in both Postgres and Redis.
+func (s *Game) CreateGame(ctx context.Context, id string) (*game.Game, error) {
+	g := game.New(id)
 
 	// Save to Postgres (ledger)
 	if err := s.postgresStore.CreateGame(ctx, g); err != nil {
@@ -57,20 +65,23 @@ func (s *GameService) CreateGame(ctx context.Context, id string) (*game.GameStat
 	return g, nil
 }
 
-// JoinGame handles player joining
-func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.GameState, error) {
+// JoinGame adds a player to an existing game. If the player is already in the game,
+// it refreshes their connection state. If not, it finds the first available seat.
+// If the game becomes full after joining, it transitions the game to the bidding phase.
+func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.Game, error) {
 	// Lock
 	_, err := s.redisStore.AcquireLock(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
-	defer s.redisStore.ReleaseLock(ctx, gameID)
+	defer func() { _ = s.redisStore.ReleaseLock(ctx, gameID) }()
 
 	// Load
 	g, err := s.redisStore.LoadGame(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load game: %w", err)
 	}
+
 	if g == nil {
 		return nil, ErrGameNotFound
 	}
@@ -89,6 +100,7 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 			if err := s.redisStore.SaveGame(ctx, g); err != nil {
 				return nil, err
 			}
+
 			return g, nil // Already in seat; refresh connection state
 		}
 	}
@@ -121,12 +133,12 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 
 	// Save Move to Postgres (Join is a move?)
 	// Architecture says "Inserts join move to Postgres ledger".
-	if err := s.postgresStore.SaveMove(ctx, "join", playerID, seat, g.Version, g.Version-1, map[string]interface{}{"name": playerName}, gameID); err != nil {
+	if err := s.postgresStore.SaveMove(ctx, "join", playerID, seat, g.Version, g.Version-1, map[string]any{"name": playerName}, gameID); err != nil {
 		return nil, fmt.Errorf("failed to save join move in db: %w", err)
 	}
 
 	// Publish
-	s.redisStore.PublishEvent(ctx, gameID, map[string]interface{}{
+	_ = s.redisStore.PublishEvent(ctx, gameID, map[string]any{
 		"type":    "player_joined",
 		"player":  g.Players[seat],
 		"version": g.Version,
@@ -135,14 +147,16 @@ func (s *GameService) JoinGame(ctx context.Context, gameID, playerID, playerName
 	return g, nil
 }
 
-// ProcessMove handles game moves
-func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload interface{}, clientVersion int64) (*game.GameState, error) {
+// ProcessMove validates and applies a game move. It handles concurrency via a distributed lock
+// and optimistic version checking. The move is persisted to the Postgres ledger and published
+// to the game's event channel.
+func (s *Game) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload any, clientVersion int64) (*game.Game, error) {
 	// 1. Lock
 	_, err := s.redisStore.AcquireLock(ctx, gameID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
-	defer s.redisStore.ReleaseLock(ctx, gameID)
+	defer func() { _ = s.redisStore.ReleaseLock(ctx, gameID) }()
 
 	// 2. Check Version
 	// Reuse err variable for subsequent operations
@@ -178,16 +192,18 @@ func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, 
 	// For moves like Discard (list of cards), we might need to be careful with JSON unmarshalling from HTTP request to domain types before calling this.
 	// Assuming payload is already domain type.
 	seat := -1
+
 	p := g.GetPlayer(playerID)
 	if p != nil {
 		seat = p.Seat
 	}
+
 	if err := s.postgresStore.SaveMove(ctx, moveType, playerID, seat, g.Version, clientVersion, payload, gameID); err != nil {
 		return nil, fmt.Errorf("failed to save move in db: %w", err)
 	}
 
 	// 8. Publish
-	s.redisStore.PublishEvent(ctx, gameID, map[string]interface{}{
+	_ = s.redisStore.PublishEvent(ctx, gameID, map[string]any{
 		"type":       "move",
 		"move_type":  moveType,
 		"player_id":  playerID,
@@ -203,24 +219,27 @@ func (s *GameService) ProcessMove(ctx context.Context, gameID, playerID string, 
 	return g, nil
 }
 
-// Subscribe returns a redis PubSub
-func (s *GameService) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
+// Subscribe returns a Redis PubSub channel for real-time game events.
+func (s *Game) Subscribe(ctx context.Context, gameID string) *redis.PubSub {
 	if s.redisStore == nil {
 		return nil
 	}
+
 	return s.redisStore.Subscribe(ctx, gameID)
 }
 
-// GetGame retrieves game state
-func (s *GameService) GetGame(ctx context.Context, gameID string) (*game.GameState, error) {
+// GetGame retrieves the current state of a game from hot storage (Redis).
+func (s *Game) GetGame(ctx context.Context, gameID string) (*game.Game, error) {
 	if s.redisStore == nil {
 		return nil, ErrRedisStoreNotInitialized
 	}
+
 	return s.redisStore.LoadGame(ctx, gameID)
 }
 
-// ListGamesByStatus retrieves a list of games with the specified status
-func (s *GameService) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.GameState, error) {
+// ListGamesByStatus retrieves a list of games with the specified status,
+// combining data from Postgres and Redis to ensure accuracy.
+func (s *Game) ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.Game, error) {
 	if s.redisStore == nil {
 		return nil, ErrRedisStoreNotInitialized
 	}
@@ -230,13 +249,15 @@ func (s *GameService) ListGamesByStatus(ctx context.Context, status game.Phase) 
 		return nil, fmt.Errorf("failed to list games from db: %w", err)
 	}
 
-	var games []*game.GameState
+	var games []*game.Game
+
 	for _, id := range ids {
 		g, err := s.redisStore.LoadGame(ctx, id)
 		if err != nil {
 			log.Warn().Str("game_id", id).Err(err).Msg("failed to load game from redis")
 			continue
 		}
+
 		if g != nil {
 			// Only include games where status actually matches (Redis is truth for hot state)
 			if g.Status == status {
