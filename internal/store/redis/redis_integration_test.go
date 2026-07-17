@@ -5,6 +5,7 @@ package redis
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -102,7 +103,7 @@ func TestReleaseLockRequiresMatchingToken(t *testing.T) {
 func TestSaveGameCAS(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	g := game.New("cas-test-" + t.Name())
+	g := game.New(fmt.Sprintf("cas-test-%s-%d", t.Name(), time.Now().UnixNano()))
 
 	// Fresh game: no version key yet, expectedVersion 0 must succeed.
 	if err := s.SaveGame(ctx, g, 0); err != nil {
@@ -136,7 +137,7 @@ func TestSaveGameCAS(t *testing.T) {
 func TestConcurrentLockedWritersLoseNoUpdates(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	g := game.New("concurrency-test-" + t.Name())
+	g := game.New(fmt.Sprintf("concurrency-test-%s-%d", t.Name(), time.Now().UnixNano()))
 
 	if err := s.SaveGame(ctx, g, 0); err != nil {
 		t.Fatalf("seed: %v", err)

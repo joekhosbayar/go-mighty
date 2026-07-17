@@ -17,6 +17,11 @@ var suitRank = map[Suit]int{
 	Spades:   4,
 }
 
+var validRanks = map[Rank]bool{
+	Ace: true, King: true, Queen: true, Jack: true, Ten: true, Nine: true,
+	Eight: true, Seven: true, Six: true, Five: true, Four: true, Three: true, Two: true,
+}
+
 // Power constants for the Mighty engine, used to determine card strength in a trick.
 const (
 	// PowerMighty represents the strength of the Mighty card (highest).
@@ -223,6 +228,15 @@ func (g *Game) validateCallPartner(p *Player, payload any) error {
 
 	if move.Card == nil && !move.NoFriend {
 		return fmt.Errorf("%w: call_partner requires a card or no_friend", ErrInvalidMove)
+	}
+
+	if move.Card != nil {
+		isJoker := move.Card.Suit == None && move.Card.Rank == Joker
+		if !isJoker {
+			if _, ok := suitRank[move.Card.Suit]; !ok || !validRanks[move.Card.Rank] {
+				return fmt.Errorf("%w: invalid partner card", ErrInvalidMove)
+			}
+		}
 	}
 
 	return nil

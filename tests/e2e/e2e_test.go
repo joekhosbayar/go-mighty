@@ -301,6 +301,16 @@ func (a *apiFeature) findLegalCard(p *game.Player) game.Card {
 	return p.Hand[0]
 }
 
+// playPayload builds a play_card payload, declaring a suit when the Joker leads.
+func (a *apiFeature) playPayload(card game.Card) map[string]any {
+	trickIdx := len(a.game.Tricks) - 1
+	leading := trickIdx >= 0 && len(a.game.Tricks[trickIdx].Cards) == 0
+	if leading && card.Rank == game.Joker {
+		return map[string]any{"card": card, "called_suit": "hearts"}
+	}
+	return map[string]any{"card": card}
+}
+
 func (a *apiFeature) playOutGame() error {
 	for trick := 1; trick <= 10; trick++ {
 		for range 5 {
@@ -324,7 +334,7 @@ func (a *apiFeature) playOutGame() error {
 			}
 
 			card := a.findLegalCard(p)
-			if err := a.move(name, game.MovePlayCard, map[string]any{"card": card}); err != nil {
+			if err := a.move(name, game.MovePlayCard, a.playPayload(card)); err != nil {
 				return err
 			}
 
@@ -557,7 +567,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 			}
 
 			card := api.findLegalCard(p)
-			if err := api.move(name, game.MovePlayCard, map[string]any{"card": card}); err != nil {
+			if err := api.move(name, game.MovePlayCard, api.playPayload(card)); err != nil {
 				return err
 			}
 

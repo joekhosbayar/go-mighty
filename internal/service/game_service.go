@@ -61,7 +61,9 @@ func (s *Game) withGameLock(ctx context.Context, gameID string) (release func(),
 		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
 
-	return func() { _ = s.redisStore.ReleaseLock(ctx, gameID, token) }, nil
+	releaseCtx := context.WithoutCancel(ctx)
+
+	return func() { _ = s.redisStore.ReleaseLock(releaseCtx, gameID, token) }, nil
 }
 
 // CreateGame initializes a new game and persists it in both Postgres and Redis.

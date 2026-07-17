@@ -109,6 +109,29 @@ func TestCallPartnerLegacyBareCardStillAccepted(t *testing.T) {
 	}
 }
 
+func TestCallPartnerRejectsMalformedCards(t *testing.T) {
+	t.Parallel()
+
+	missingRank := CallPartnerMove{Card: &Card{Suit: Hearts}}
+	if err := callingGame().ValidateMove("p0", MoveCallPartner, missingRank); !errors.Is(err, ErrInvalidMove) {
+		t.Fatalf("card without rank must be rejected, got %v", err)
+	}
+
+	bogusSuit := CallPartnerMove{Card: &Card{Suit: "bogus", Rank: Ace}}
+	if err := callingGame().ValidateMove("p0", MoveCallPartner, bogusSuit); !errors.Is(err, ErrInvalidMove) {
+		t.Fatalf("bogus suit must be rejected, got %v", err)
+	}
+}
+
+func TestCallPartnerAcceptsTheJoker(t *testing.T) {
+	t.Parallel()
+
+	joker := CallPartnerMove{Card: &Card{Suit: None, Rank: Joker}}
+	if err := callingGame().ValidateMove("p0", MoveCallPartner, joker); err != nil {
+		t.Fatalf("calling the joker must be legal: %v", err)
+	}
+}
+
 // playingGameWithPartnerCard returns a game mid-play (trick 2 open) where the
 // declarer (seat 0) has called ♦A and it sits in seat 2's hand.
 func playingGameWithPartnerCard() *Game {

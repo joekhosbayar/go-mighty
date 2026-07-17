@@ -58,4 +58,16 @@ func TestAllPassRedealsInsteadOfFinishing(t *testing.T) {
 	if g.Version <= versionBefore {
 		t.Fatalf("version must advance across redeal: %d -> %d", versionBefore, g.Version)
 	}
+
+	afterHands := make([][]Card, 5)
+	for i, p := range g.Players {
+		afterHands[i] = append([]Card{}, p.Hand...)
+	}
+
+	before := fmt.Sprint(firstHands)
+	after := fmt.Sprint(afterHands)
+
+	if before == after {
+		t.Fatal("redeal did not reshuffle hands")
+	}
 }
