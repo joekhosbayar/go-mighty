@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,8 +122,13 @@ func (s *Store) LoadGame(ctx context.Context, gameID string) (g *game.Game, err 
 	return &loadedGame, nil
 }
 
+// lockBackoff is the retry schedule when the lock is contended.
+var lockBackoff = []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond}
+
 // AcquireLock acquires a distributed lock for the game with a 5-second expiration.
-func (s *Store) AcquireLock(ctx context.Context, gameID string) (locked bool, err error) {
+// It returns an ownership token required to release the lock, retrying with
+// backoff while contended. Returns ErrLockFailed if the lock stays held.
+func (s *Store) AcquireLock(ctx context.Context, gameID string) (token string, err error) {
 	start := time.Now()
 
 	key := s.Key(gameID) + ":lock"
@@ -130,17 +137,50 @@ func (s *Store) AcquireLock(ctx context.Context, gameID string) (locked bool, er
 			Str("component", "redis").
 			Str("op", "AcquireLock").
 			Str("key", key).
-			Bool("locked", locked).
+			Bool("locked", token != "").
 			Err(err).
 			Dur("latency", time.Since(start)).
 			Msg("AcquireLock")
 	}()
-	// Simple setnx with expiration
-	return s.client.SetNX(ctx, key, "locked", 5*time.Second).Result()
+
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+
+	candidate := hex.EncodeToString(raw)
+
+	for attempt := 0; ; attempt++ {
+		ok, err := s.client.SetNX(ctx, key, candidate, 5*time.Second).Result()
+		if err != nil {
+			return "", err
+		}
+
+		if ok {
+			return candidate, nil
+		}
+
+		if attempt >= len(lockBackoff) {
+			return "", ErrLockFailed
+		}
+
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(lockBackoff[attempt]):
+		}
+	}
 }
 
-// ReleaseLock deletes the distributed lock for a game.
-func (s *Store) ReleaseLock(ctx context.Context, gameID string) (err error) {
+// releaseScript deletes the lock only when the caller still owns it.
+var releaseScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+	return redis.call("DEL", KEYS[1])
+end
+return 0`)
+
+// ReleaseLock releases the distributed lock if token matches the current owner.
+func (s *Store) ReleaseLock(ctx context.Context, gameID, token string) (err error) {
 	start := time.Now()
 
 	key := s.Key(gameID) + ":lock"
@@ -154,7 +194,7 @@ func (s *Store) ReleaseLock(ctx context.Context, gameID string) (err error) {
 			Msg("ReleaseLock")
 	}()
 
-	return s.client.Del(ctx, key).Err()
+	return releaseScript.Run(ctx, s.client, []string{key}, token).Err()
 }
 
 // CheckVersion checks if client version matches server version.
