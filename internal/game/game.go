@@ -39,8 +39,9 @@ const (
 
 // PlayCardMove represents the payload for playing a card.
 type PlayCardMove struct {
-	Card      Card `json:"card"`
-	CallJoker bool `json:"call_joker"`
+	Card       Card `json:"card"`
+	CallJoker  bool `json:"call_joker"`
+	CalledSuit Suit `json:"called_suit,omitempty"` // required when leading the Joker
 }
 
 // CallPartnerMove represents the declarer's friend call: either a card

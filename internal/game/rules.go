@@ -285,6 +285,16 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 			}
 		}
 
+		// Joker lead must declare the suit followers owe; called_suit is
+		// meaningless on any other play.
+		if card.Rank == Joker {
+			if _, ok := suitRank[move.CalledSuit]; !ok {
+				return fmt.Errorf("%w: joker lead requires called_suit", ErrInvalidMove)
+			}
+		} else if move.CalledSuit != "" {
+			return fmt.Errorf("%w: called_suit only valid when leading the joker", ErrInvalidMove)
+		}
+
 		// Joker Caller option
 		if move.CallJoker && !g.IsJokerCaller(card) {
 			return fmt.Errorf("%w: only joker caller can call joker", ErrInvalidMove)
@@ -295,6 +305,10 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 		}
 
 		return nil
+	}
+
+	if move.CalledSuit != "" {
+		return fmt.Errorf("%w: called_suit only valid when leading the joker", ErrInvalidMove)
 	}
 
 	// 3. Following Suit
@@ -528,12 +542,8 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		// Set Lead Suit if first card
 		if len(g.Tricks[idx].Cards) == 1 {
 			g.Tricks[idx].LeadSuit = card.Suit
-			// If Joker led, LeadSuit is whatever was passed?
-			// Actually Joker has no suit. The user said: "And if you begin the trick with the Joker, you have to specify the suit you want"
-			// So for Joker lead, we might need a JokerSuit in PlayCardMove.
-			// Let's assume Card.Suit is used to specify the suit for Joker lead.
 			if card.Rank == Joker {
-				g.Tricks[idx].LeadSuit = card.Suit
+				g.Tricks[idx].LeadSuit = move.CalledSuit
 			}
 
 			// Handle Joker Caller
