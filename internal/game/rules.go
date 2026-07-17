@@ -410,17 +410,10 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 
 		bid.PlayerID = playerID // Ensure playerID is set
 
-		// If pass
-		if bid.Points == 0 {
-			p := g.GetPlayer(playerID)
-			if p != nil {
-				g.PassedPlayers[p.Seat] = true
-			}
-		} else {
-			g.CurrentBid = &bid
-			g.Declarer = p.Seat                  // Potential declarer
-			g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
-		}
+		g.CurrentBid = &bid
+		g.Declarer = p.Seat                  // Potential declarer
+		g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
+
 		// In rotation, move turn to next player?
 		// Or if everyone passes?
 		// Simplified: We assume bidding continues until 4 passes?
@@ -443,9 +436,18 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			declarer.Hand = append(declarer.Hand, g.Kitty...)
 			g.Kitty = nil // Empty kitty
 		} else if len(g.PassedPlayers) == 5 {
-			// Redeal?
-			// TODO: Implement redeal logic or just error/finish
-			g.Status = PhaseFinished
+			// Everyone passed: throw the hand in and redeal.
+			g.Bids = nil
+			g.CurrentBid = nil
+			g.Contract = nil
+			g.Declarer = -1
+			g.PassedPlayers = make(map[int]bool)
+			g.PartnerCard = nil
+			g.PartnerSeat = -1
+			g.IsNoFriend = false
+			g.Trump = ""
+			g.Tricks = make([]Trick, 0)
+			g.Start()
 		}
 
 	case MoveDiscard:
