@@ -516,3 +516,38 @@ func TestJoinHandlerMapsGameBusyTo409(t *testing.T) {
 		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestConvertPayloadCallPartnerShapes(t *testing.T) {
+	t.Parallel()
+
+	got, err := ConvertPayload(game.MoveCallPartner, map[string]any{"no_friend": true})
+	if err != nil {
+		t.Fatalf("no_friend: %v", err)
+	}
+
+	if move, ok := got.(game.CallPartnerMove); !ok || !move.NoFriend || move.Card != nil {
+		t.Fatalf("bad no_friend conversion: %#v", got)
+	}
+
+	got, err = ConvertPayload(game.MoveCallPartner, map[string]any{"card": map[string]any{"suit": "hearts", "rank": "A"}})
+	if err != nil {
+		t.Fatalf("card shape: %v", err)
+	}
+
+	if move, ok := got.(game.CallPartnerMove); !ok || move.Card == nil || move.Card.Suit != game.Hearts {
+		t.Fatalf("bad card conversion: %#v", got)
+	}
+
+	got, err = ConvertPayload(game.MoveCallPartner, map[string]any{"suit": "hearts", "rank": "A"})
+	if err != nil {
+		t.Fatalf("legacy shape: %v", err)
+	}
+
+	if move, ok := got.(game.CallPartnerMove); !ok || move.Card == nil || move.Card.Rank != game.Ace {
+		t.Fatalf("bad legacy conversion: %#v", got)
+	}
+
+	if _, err := ConvertPayload(game.MoveCallPartner, map[string]any{}); err == nil {
+		t.Fatal("empty call_partner payload must be rejected")
+	}
+}

@@ -43,6 +43,13 @@ type PlayCardMove struct {
 	CallJoker bool `json:"call_joker"`
 }
 
+// CallPartnerMove represents the declarer's friend call: either a card
+// (whose holder becomes the secret partner) or no_friend to play alone.
+type CallPartnerMove struct {
+	Card     *Card `json:"card,omitempty"`
+	NoFriend bool  `json:"no_friend,omitempty"`
+}
+
 // Config holds configuration for the game.
 type Config struct {
 	MaxPlayers   int `json:"max_players"`

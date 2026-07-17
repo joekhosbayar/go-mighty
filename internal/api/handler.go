@@ -270,12 +270,22 @@ func ConvertPayload(moveType game.MoveType, payload any) (any, error) {
 
 		return cards, nil
 	case game.MoveCallPartner:
-		var card game.Card
-		if err := json.Unmarshal(data, &card); err != nil {
+		var move game.CallPartnerMove
+		if err := json.Unmarshal(data, &move); err != nil {
 			return nil, err
 		}
 
-		return card, nil
+		if move.Card == nil && !move.NoFriend {
+			// Legacy shape: the payload is the card itself.
+			var card game.Card
+			if err := json.Unmarshal(data, &card); err == nil && card.Rank != "" {
+				return game.CallPartnerMove{Card: &card}, nil
+			}
+
+			return nil, errors.New("call_partner requires a card or no_friend")
+		}
+
+		return move, nil
 	case game.MovePlayCard:
 		// Attempt to unmarshal as PlayCardMove first
 		var playMove game.PlayCardMove

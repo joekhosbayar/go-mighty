@@ -189,8 +189,20 @@ func (g *Game) validateDiscard(p *Player, payload any) error {
 	return nil
 }
 
+// asCallPartnerMove normalizes the two accepted payload shapes.
+func asCallPartnerMove(payload any) (CallPartnerMove, error) {
+	switch v := payload.(type) {
+	case CallPartnerMove:
+		return v, nil
+	case Card:
+		return CallPartnerMove{Card: &v}, nil
+	default:
+		return CallPartnerMove{}, errors.New("invalid payload for partner call")
+	}
+}
+
 // validateCallPartner
-// Payload: Card (the partner card).
+// Payload: CallPartnerMove (or legacy Card).
 func (g *Game) validateCallPartner(p *Player, payload any) error {
 	if g.Status != PhaseCalling {
 		return fmt.Errorf("%w: not in calling phase", ErrInvalidMove)
@@ -200,11 +212,17 @@ func (g *Game) validateCallPartner(p *Player, payload any) error {
 		return fmt.Errorf("%w: only declarer call partner", ErrInvalidMove)
 	}
 
-	// Check payload
-	// It's just a card.
-	_, ok := payload.(Card)
-	if !ok {
-		return errors.New("invalid payload for partner call")
+	move, err := asCallPartnerMove(payload)
+	if err != nil {
+		return err
+	}
+
+	if move.Card != nil && move.NoFriend {
+		return fmt.Errorf("%w: choose a card or no_friend, not both", ErrInvalidMove)
+	}
+
+	if move.Card == nil && !move.NoFriend {
+		return fmt.Errorf("%w: call_partner requires a card or no_friend", ErrInvalidMove)
 	}
 
 	return nil
@@ -451,12 +469,18 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		g.Status = PhaseCalling
 
 	case MoveCallPartner:
-		card, ok := payload.(Card)
-		if !ok {
-			return errors.New("invalid payload for call partner")
+		move, err := asCallPartnerMove(payload)
+		if err != nil {
+			return err
 		}
 
-		g.PartnerCard = &card
+		if move.NoFriend {
+			g.IsNoFriend = true
+			g.PartnerCard = nil
+		} else {
+			g.PartnerCard = move.Card
+		}
+
 		g.Status = PhasePlaying
 		// Start playing
 		g.CurrentTurn = g.Declarer // Declarer leads first trick
