@@ -187,6 +187,11 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if errors.Is(err, service.ErrGameBusy) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
@@ -229,6 +234,11 @@ func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
 
 	g, err := h.svc.ProcessMove(r.Context(), gameID, req.PlayerID, req.MoveType, convertedPayload, req.ClientVersion)
 	if err != nil {
+		if errors.Is(err, service.ErrGameBusy) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+
 		http.Error(w, err.Error(), http.StatusBadRequest) // Assume generic 400 for logic error
 		return
 	}

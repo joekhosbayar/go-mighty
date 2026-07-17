@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -11,6 +12,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/service"
+	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // TestLoggingResponseWriter_WriteHeader tests that WriteHeader properly sets the status code.
@@ -459,3 +465,54 @@ func (m *mockConn) RemoteAddr() net.Addr               { return nil }
 func (m *mockConn) SetDeadline(_ time.Time) error      { return nil }
 func (m *mockConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (m *mockConn) SetWriteDeadline(_ time.Time) error { return nil }
+
+// busyGameService fails every ProcessMove with lock contention.
+type busyGameService struct{}
+
+func (busyGameService) CreateGame(_ context.Context, _ string) (*game.Game, error) { return nil, nil }
+func (busyGameService) JoinGame(_ context.Context, _, _, _ string) (*game.Game, error) {
+	return nil, service.ErrGameBusy
+}
+func (busyGameService) ProcessMove(_ context.Context, _, _ string, _ game.MoveType, _ any, _ int64) (*game.Game, error) {
+	return nil, service.ErrGameBusy
+}
+func (busyGameService) Subscribe(_ context.Context, _ string) *goredis.PubSub { return nil }
+func (busyGameService) GetGame(_ context.Context, _ string) (*game.Game, error) { return nil, nil }
+func (busyGameService) ListGamesByStatus(_ context.Context, _ game.Phase) ([]*game.Game, error) {
+	return nil, nil
+}
+
+func TestMoveHandlerMapsGameBusyTo409(t *testing.T) {
+	t.Parallel()
+
+	h := NewHandler(busyGameService{}, service.NewAuth(&postgres.Store{}, "testsecret"))
+
+	req := httptest.NewRequest(http.MethodPost, "/games/g1/move",
+		strings.NewReader(`{"move_type":"pass","client_version":1,"payload":null}`))
+	req.SetPathValue("id", "g1")
+	req.Header.Set("Authorization", "Bearer "+generateValidToken("user-1", "alice"))
+
+	rec := httptest.NewRecorder()
+	h.MoveHandler(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestJoinHandlerMapsGameBusyTo409(t *testing.T) {
+	t.Parallel()
+
+	h := NewHandler(busyGameService{}, service.NewAuth(&postgres.Store{}, "testsecret"))
+
+	req := httptest.NewRequest(http.MethodPost, "/games/g1/join", nil)
+	req.SetPathValue("id", "g1")
+	req.Header.Set("Authorization", "Bearer "+generateValidToken("user-1", "alice"))
+
+	rec := httptest.NewRecorder()
+	h.JoinGameHandler(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
