@@ -11,12 +11,14 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
 	"github.com/go-resty/resty/v2"
+	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 )
 
@@ -29,6 +31,10 @@ type apiFeature struct {
 	activeGameID string
 	game         *game.Game
 	runID        string
+
+	// WebSocket subscriber state
+	wsConn     *websocket.Conn
+	wsLastEvent string
 }
 
 var userCounter atomic.Int32
@@ -341,6 +347,17 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 		api.game = nil
 		api.activeGameID = ""
 		api.runID = strconv.FormatInt(time.Now().UnixNano(), 10)
+		api.wsConn = nil
+		api.wsLastEvent = ""
+
+		return ctx, nil
+	})
+
+	ctx.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		if api.wsConn != nil {
+			_ = api.wsConn.Close()
+			api.wsConn = nil
+		}
 
 		return ctx, nil
 	})
@@ -482,6 +499,95 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^"([^"]*)" should be the declarer$`, func(_ string) error { return nil })
 	ctx.Step(`^(\d+) tricks are played through the WebSocket$`, func(_ int) error { return api.playOutGame() })
 	ctx.Step(`^final scores should be calculated correctly$`, func() error { return nil })
+
+	// --- WebSocket steps ---
+	ctx.Step(`^a WebSocket client connects to game "([^"]*)" with an invalid token$`, func(_ string) error {
+		return api.connectWSWithToken(baseURL, "totally-invalid-jwt-token")
+	})
+	ctx.Step(`^the WebSocket should receive an error containing "([^"]*)"$`, func(expected string) error {
+		if api.wsConn == nil {
+			return errors.New("no WebSocket connection")
+		}
+
+		_ = api.wsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+		_, data, err := api.wsConn.ReadMessage()
+		if err != nil {
+			return fmt.Errorf("failed to read WS message: %w", err)
+		}
+
+		if !strings.Contains(string(data), expected) {
+			return fmt.Errorf("expected WS error containing %q, got: %s", expected, string(data))
+		}
+
+		return nil
+	})
+	ctx.Step(`^a WebSocket subscriber connects to game "([^"]*)" as "([^"]*)"$`, func(_ string, username string) error {
+		token := api.tokens[username]
+		if token == "" {
+			return fmt.Errorf("no token for user %q", username)
+		}
+
+		if err := api.connectWSWithToken(baseURL, token); err != nil {
+			return err
+		}
+
+		// Give the server a moment to register the subscription
+		time.Sleep(200 * time.Millisecond)
+
+		return nil
+	})
+	ctx.Step(`^the subscriber should receive a "([^"]*)" event within (\d+) seconds$`, func(eventType string, timeout int) error {
+		if api.wsConn == nil {
+			return errors.New("no WebSocket connection")
+		}
+
+		_ = api.wsConn.SetReadDeadline(time.Now().Add(time.Duration(timeout) * time.Second))
+
+		_, data, err := api.wsConn.ReadMessage()
+		if err != nil {
+			return fmt.Errorf("timed out waiting for %q event: %w", eventType, err)
+		}
+
+		api.wsLastEvent = string(data)
+
+		var event map[string]any
+		if err := json.Unmarshal(data, &event); err != nil {
+			return fmt.Errorf("failed to decode event: %w (raw: %s)", err, string(data))
+		}
+
+		gotType, _ := event["type"].(string)
+		if gotType != eventType {
+			return fmt.Errorf("expected event type %q, got %q (raw: %s)", eventType, gotType, string(data))
+		}
+
+		return nil
+	})
+}
+
+// connectWSWithToken dials the WebSocket endpoint for the active game, then sends the
+// first-message AUTH frame with the given token. It stores the connection in api.wsConn.
+func (a *apiFeature) connectWSWithToken(baseURL, token string) error {
+	wsURL := strings.Replace(baseURL, "http", "ws", 1) + "/games/" + a.activeGameID + "/ws"
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("WebSocket dial failed: %w", err)
+	}
+
+	authMsg, _ := json.Marshal(map[string]string{
+		"type":  "AUTH",
+		"token": token,
+	})
+
+	if err := conn.WriteMessage(websocket.TextMessage, authMsg); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("failed to send AUTH message: %w", err)
+	}
+
+	a.wsConn = conn
+
+	return nil
 }
 
 func TestFeatures(t *testing.T) {
