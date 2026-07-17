@@ -520,6 +520,11 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			Card:     card,
 		})
 
+		// Reveal the mystery friend the moment the called card hits the table.
+		if g.PartnerCard != nil && card.Suit == g.PartnerCard.Suit && card.Rank == g.PartnerCard.Rank {
+			g.PartnerSeat = p.Seat
+		}
+
 		// Set Lead Suit if first card
 		if len(g.Tricks[idx].Cards) == 1 {
 			g.Tricks[idx].LeadSuit = card.Suit
@@ -712,8 +717,8 @@ func (g *Game) CalculateFinalScore() (float64, float64) {
 	}
 
 	friendScore := score / 2.0
-	if g.IsNoFriend {
-		friendScore = 0 // No friend to share with!
+	if g.IsNoFriend || g.PartnerSeat < 0 {
+		friendScore = 0 // No revealed friend to share with.
 	}
 
 	return score, friendScore

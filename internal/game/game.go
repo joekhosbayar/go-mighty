@@ -105,7 +105,7 @@ type Game struct {
 	Tricks []Trick `json:"tricks"`
 
 	// Scoring
-	Scores map[string]int `json:"scores"` // Points taken by each player (accumulated)
+	Scores map[string]int `json:"scores"` // Final round scores: declarer full, revealed partner half, others 0. Card points live in Player.Points.
 
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
