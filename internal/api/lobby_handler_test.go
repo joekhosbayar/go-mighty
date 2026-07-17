@@ -29,7 +29,7 @@ type fakeRedisStore struct {
 	games map[string]*game.Game
 }
 
-func (f *fakeRedisStore) SaveGame(_ context.Context, _ *game.Game) error { return nil }
+func (f *fakeRedisStore) SaveGame(_ context.Context, _ *game.Game, _ int64) error { return nil }
 func (f *fakeRedisStore) LoadGame(_ context.Context, gameID string) (*game.Game, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -41,13 +41,10 @@ func (f *fakeRedisStore) LoadGame(_ context.Context, gameID string) (*game.Game,
 	return nil, nil
 }
 
-func (f *fakeRedisStore) AcquireLock(_ context.Context, _ string) (bool, error) {
-	return true, nil
+func (f *fakeRedisStore) AcquireLock(_ context.Context, _ string) (string, error) {
+	return "test-token", nil
 }
-func (f *fakeRedisStore) ReleaseLock(_ context.Context, _ string) error { return nil }
-func (f *fakeRedisStore) CheckVersion(_ context.Context, _ string, _ int64) error {
-	return nil
-}
+func (f *fakeRedisStore) ReleaseLock(_ context.Context, _, _ string) error { return nil }
 
 func (f *fakeRedisStore) PublishEvent(_ context.Context, _ string, _ any) error {
 	return nil
