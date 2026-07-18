@@ -78,6 +78,8 @@ Submits a game action. Recommended only for slow-turn actions or as a WebSocket 
 }
 ```
 
+**Errors**: `409 Conflict` with body `game busy` when the game's move lock is contended — retry the request. `400` with `stale version` when `client_version` does not match the current game version — refresh state and retry.
+
 ---
 
 ## WebSocket Interface
@@ -124,15 +126,21 @@ Clients can send moves directly over the socket:
 `[{"suit": "hearts", "rank": "2"}, ...]` (Exactly 3 cards)
 
 ### 3. Call Partner
-`{"suit": "hearts", "rank": "A"}`
+Either call a card (its holder becomes the secret partner):
+`{"card": {"suit": "hearts", "rank": "A"}}`
+or play alone for doubled score:
+`{"no_friend": true}`
+Exactly one of the two must be present. (A legacy bare card object is still accepted.)
 
 ### 4. Play Card
 ```json
 {
   "card": {"suit": "clubs", "rank": "10"},
-  "call_joker": false // Set to true if leading the Joker Caller (3-Clubs)
+  "call_joker": false,     // true only when leading the Joker Caller (3-Clubs)
+  "called_suit": "hearts"  // REQUIRED when leading the Joker; forbidden otherwise
 }
 ```
+When the Joker leads, `called_suit` becomes the trick's lead suit and other players must follow it.
 
 ---
 
@@ -148,3 +156,5 @@ Clients can send moves directly over the socket:
 - **Losing Score**: `-(Contract * 10)` (with additional penalties if down > 1).
 - **Multipliers**: Stacking `x2` for **No-Trump**, **No-Friend**, and **10-Bids**.
 - **Cap**: Maximum score/loss is capped at **800** points.
+- **`scores` field**: final round scores — declarer full score, revealed partner half, all other players 0. Card points taken in tricks are in each player's `points` array.
+- **All-pass**: if all five players pass, the hand is thrown in and redealt (status returns to `bidding` with fresh hands).

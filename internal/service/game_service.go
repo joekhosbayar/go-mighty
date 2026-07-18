@@ -10,6 +10,7 @@ import (
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
+	redisstore "github.com/joekhosbayar/go-mighty/internal/store/redis"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 )
@@ -21,15 +22,16 @@ var (
 	ErrGameNotFound = errors.New("game not found")
 	// ErrGameFull is returned when a player attempts to join a game that already has 5 players.
 	ErrGameFull = errors.New("game is full")
+	// ErrGameBusy is returned when the game's lock cannot be acquired in time.
+	ErrGameBusy = errors.New("game busy")
 )
 
 // RedisStore defines the interface for hot state storage of games in Redis.
 type RedisStore interface {
-	SaveGame(ctx context.Context, g *game.Game) error
+	SaveGame(ctx context.Context, g *game.Game, expectedVersion int64) error
 	LoadGame(ctx context.Context, gameID string) (*game.Game, error)
-	AcquireLock(ctx context.Context, gameID string) (bool, error)
-	ReleaseLock(ctx context.Context, gameID string) error
-	CheckVersion(ctx context.Context, gameID string, clientVersion int64) error
+	AcquireLock(ctx context.Context, gameID string) (string, error)
+	ReleaseLock(ctx context.Context, gameID, token string) error
 	PublishEvent(ctx context.Context, gameID string, event any) error
 	Subscribe(ctx context.Context, gameID string) *redis.PubSub
 }
@@ -48,6 +50,22 @@ func NewGame(r RedisStore, p *postgres.Store) *Game {
 	}
 }
 
+// withGameLock acquires the game's distributed lock, mapping contention to ErrGameBusy.
+func (s *Game) withGameLock(ctx context.Context, gameID string) (release func(), err error) {
+	token, err := s.redisStore.AcquireLock(ctx, gameID)
+	if err != nil {
+		if errors.Is(err, redisstore.ErrLockFailed) {
+			return nil, ErrGameBusy
+		}
+
+		return nil, fmt.Errorf("failed to acquire lock: %w", err)
+	}
+
+	releaseCtx := context.WithoutCancel(ctx)
+
+	return func() { _ = s.redisStore.ReleaseLock(releaseCtx, gameID, token) }, nil
+}
+
 // CreateGame initializes a new game and persists it in both Postgres and Redis.
 func (s *Game) CreateGame(ctx context.Context, id string) (*game.Game, error) {
 	g := game.New(id)
@@ -58,7 +76,7 @@ func (s *Game) CreateGame(ctx context.Context, id string) (*game.Game, error) {
 	}
 
 	// Save to Redis (hot state)
-	if err := s.redisStore.SaveGame(ctx, g); err != nil {
+	if err := s.redisStore.SaveGame(ctx, g, 0); err != nil {
 		return nil, fmt.Errorf("failed to save game in redis: %w", err)
 	}
 
@@ -70,11 +88,11 @@ func (s *Game) CreateGame(ctx context.Context, id string) (*game.Game, error) {
 // If the game becomes full after joining, it transitions the game to the bidding phase.
 func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.Game, error) {
 	// Lock
-	_, err := s.redisStore.AcquireLock(ctx, gameID)
+	release, err := s.withGameLock(ctx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to acquire lock: %w", err)
+		return nil, err
 	}
-	defer func() { _ = s.redisStore.ReleaseLock(ctx, gameID) }()
+	defer release()
 
 	// Load
 	g, err := s.redisStore.LoadGame(ctx, gameID)
@@ -85,6 +103,8 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 	if g == nil {
 		return nil, ErrGameNotFound
 	}
+
+	loadedVersion := g.Version
 
 	// Logic: Find seat
 	seat := -1
@@ -97,7 +117,7 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 			g.Version++
 			g.UpdatedAt = time.Now()
 
-			if err := s.redisStore.SaveGame(ctx, g); err != nil {
+			if err := s.redisStore.SaveGame(ctx, g, loadedVersion); err != nil {
 				return nil, err
 			}
 
@@ -127,7 +147,7 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 	}
 
 	// Save
-	if err := s.redisStore.SaveGame(ctx, g); err != nil {
+	if err := s.redisStore.SaveGame(ctx, g, loadedVersion); err != nil {
 		return nil, err
 	}
 
@@ -152,41 +172,43 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 // to the game's event channel.
 func (s *Game) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload any, clientVersion int64) (*game.Game, error) {
 	// 1. Lock
-	_, err := s.redisStore.AcquireLock(ctx, gameID)
+	release, err := s.withGameLock(ctx, gameID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to acquire lock: %w", err)
+		return nil, err
 	}
-	defer func() { _ = s.redisStore.ReleaseLock(ctx, gameID) }()
+	defer release()
 
-	// 2. Check Version
-	// Reuse err variable for subsequent operations
-	err = s.redisStore.CheckVersion(ctx, gameID, clientVersion)
-	if err != nil {
-		return nil, err // Returns stale version error
-	}
-
-	// 3. Load
+	// 2. Load
 	g, err := s.redisStore.LoadGame(ctx, gameID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 4. Validate
+	if g == nil {
+		return nil, ErrGameNotFound
+	}
+
+	loadedVersion := g.Version
+	if clientVersion != loadedVersion {
+		return nil, redisstore.ErrStaleVersion
+	}
+
+	// 3. Validate
 	if err := g.ValidateMove(playerID, moveType, payload); err != nil {
 		return nil, err
 	}
 
-	// 5. Apply
+	// 4. Apply
 	if err := g.ApplyMove(playerID, moveType, payload); err != nil {
 		return nil, err
 	}
 
-	// 6. Save Redis
-	if err := s.redisStore.SaveGame(ctx, g); err != nil {
+	// 5. Save Redis
+	if err := s.redisStore.SaveGame(ctx, g, loadedVersion); err != nil {
 		return nil, err
 	}
 
-	// 7. Save Postgres
+	// 6. Save Postgres
 	// Convert payload to appropriate type if needed?
 	// Payload is interface{}, Postgres checks specific types or marshals JSON.
 	// For moves like Discard (list of cards), we might need to be careful with JSON unmarshalling from HTTP request to domain types before calling this.
@@ -202,7 +224,7 @@ func (s *Game) ProcessMove(ctx context.Context, gameID, playerID string, moveTyp
 		return nil, fmt.Errorf("failed to save move in db: %w", err)
 	}
 
-	// 8. Publish
+	// 7. Publish
 	_ = s.redisStore.PublishEvent(ctx, gameID, map[string]any{
 		"type":       "move",
 		"move_type":  moveType,

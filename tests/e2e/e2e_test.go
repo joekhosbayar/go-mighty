@@ -31,6 +31,7 @@ type apiFeature struct {
 	activeGameID string
 	game         *game.Game
 	runID        string
+	calledCard   *game.Card
 
 	// WebSocket subscriber state
 	wsConn     *websocket.Conn
@@ -268,6 +269,10 @@ func (a *apiFeature) findLegalCard(p *game.Player) game.Card {
 	currentTrick := a.game.Tricks[trickIdx]
 	if len(currentTrick.Cards) == 0 {
 		for _, c := range p.Hand {
+			if c.Rank == game.Joker && len(p.Hand) > 1 {
+				continue // leading the Joker needs called_suit; keep bots simple
+			}
+
 			if len(a.game.Tricks) == 1 && c.Suit == a.game.Trump {
 				hasNon := false
 
@@ -296,6 +301,16 @@ func (a *apiFeature) findLegalCard(p *game.Player) game.Card {
 	return p.Hand[0]
 }
 
+// playPayload builds a play_card payload, declaring a suit when the Joker leads.
+func (a *apiFeature) playPayload(card game.Card) map[string]any {
+	trickIdx := len(a.game.Tricks) - 1
+	leading := trickIdx >= 0 && len(a.game.Tricks[trickIdx].Cards) == 0
+	if leading && card.Rank == game.Joker {
+		return map[string]any{"card": card, "called_suit": "hearts"}
+	}
+	return map[string]any{"card": card}
+}
+
 func (a *apiFeature) playOutGame() error {
 	for trick := 1; trick <= 10; trick++ {
 		for range 5 {
@@ -319,7 +334,7 @@ func (a *apiFeature) playOutGame() error {
 			}
 
 			card := a.findLegalCard(p)
-			if err := a.move(name, game.MovePlayCard, map[string]any{"card": card}); err != nil {
+			if err := a.move(name, game.MovePlayCard, a.playPayload(card)); err != nil {
 				return err
 			}
 
@@ -349,6 +364,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 		api.runID = strconv.FormatInt(time.Now().UnixNano(), 10)
 		api.wsConn = nil
 		api.wsLastEvent = ""
+		api.calledCard = nil
 
 		return ctx, nil
 	})
@@ -460,7 +476,77 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 		return api.move(u, game.MoveDiscard, cards)
 	})
 	ctx.Step(`^"([^"]*)" calls the "([^"]*)" as the friend$`, func(u, _ string) error {
-		return api.move(u, game.MoveCallPartner, game.Card{Suit: game.Hearts, Rank: game.Ace})
+		card := game.Card{Suit: game.Hearts, Rank: game.Ace}
+		api.calledCard = &card
+
+		return api.move(u, game.MoveCallPartner, game.CallPartnerMove{Card: &card})
+	})
+	ctx.Step(`^"([^"]*)" declares no friend$`, func(u string) error {
+		return api.move(u, game.MoveCallPartner, map[string]any{"no_friend": true})
+	})
+	ctx.Step(`^all remaining tricks are played out legally$`, func() error { return api.playOutGame() })
+	ctx.Step(`^the game should have no friend$`, func() error {
+		if err := api.refreshState(); err != nil {
+			return err
+		}
+
+		if !api.game.IsNoFriend {
+			return errors.New("expected is_no_friend true")
+		}
+
+		return nil
+	})
+	ctx.Step(`^the partner seat should match whoever played the called card$`, func() error {
+		if err := api.refreshState(); err != nil {
+			return err
+		}
+
+		playedBy := -1
+
+		for _, trick := range api.game.Tricks {
+			for _, pc := range trick.Cards {
+				if api.calledCard != nil && pc.Card.Suit == api.calledCard.Suit && pc.Card.Rank == api.calledCard.Rank {
+					playedBy = pc.Seat
+				}
+			}
+		}
+
+		if api.game.PartnerSeat != playedBy {
+			return fmt.Errorf("partner seat %d, but called card was played by seat %d", api.game.PartnerSeat, playedBy)
+		}
+
+		return nil
+	})
+	ctx.Step(`^the final scores should follow the declarer-partner split$`, func() error {
+		if err := api.refreshState(); err != nil {
+			return err
+		}
+
+		declarer := api.game.Players[api.game.Declarer]
+		declarerScore := api.game.Scores[declarer.ID]
+
+		if declarerScore == 0 {
+			return errors.New("declarer round score must be non-zero")
+		}
+
+		if seat := api.game.PartnerSeat; seat >= 0 && seat != api.game.Declarer {
+			partnerScore := api.game.Scores[api.game.Players[seat].ID]
+			if diff := declarerScore - 2*partnerScore; diff < -1 || diff > 1 {
+				return fmt.Errorf("partner score %d is not half of declarer %d", partnerScore, declarerScore)
+			}
+		}
+
+		for _, p := range api.game.Players {
+			if p == nil || p.Seat == api.game.Declarer || p.Seat == api.game.PartnerSeat {
+				continue
+			}
+
+			if s := api.game.Scores[p.ID]; s != 0 {
+				return fmt.Errorf("non-team player %d has score %d, want 0", p.Seat, s)
+			}
+		}
+
+		return nil
 	})
 	ctx.Step(`^the trump suit should be "([^"]*)"$`, func(_ string) error { return nil })
 	ctx.Step(`^"([^"]*)" leads the first trick$`, func(_ string) error { return nil })
@@ -481,7 +567,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 			}
 
 			card := api.findLegalCard(p)
-			if err := api.move(name, game.MovePlayCard, map[string]any{"card": card}); err != nil {
+			if err := api.move(name, game.MovePlayCard, api.playPayload(card)); err != nil {
 				return err
 			}
 

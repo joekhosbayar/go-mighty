@@ -39,8 +39,16 @@ const (
 
 // PlayCardMove represents the payload for playing a card.
 type PlayCardMove struct {
-	Card      Card `json:"card"`
-	CallJoker bool `json:"call_joker"`
+	Card       Card `json:"card"`
+	CallJoker  bool `json:"call_joker"`
+	CalledSuit Suit `json:"called_suit,omitempty"` // required when leading the Joker
+}
+
+// CallPartnerMove represents the declarer's friend call: either a card
+// (whose holder becomes the secret partner) or no_friend to play alone.
+type CallPartnerMove struct {
+	Card     *Card `json:"card,omitempty"`
+	NoFriend bool  `json:"no_friend,omitempty"`
 }
 
 // Config holds configuration for the game.
@@ -98,7 +106,7 @@ type Game struct {
 	Tricks []Trick `json:"tricks"`
 
 	// Scoring
-	Scores map[string]int `json:"scores"` // Points taken by each player (accumulated)
+	Scores map[string]int `json:"scores"` // Final round scores: declarer full, revealed partner half, others 0. Card points live in Player.Points.
 
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`

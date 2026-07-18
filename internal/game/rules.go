@@ -17,6 +17,11 @@ var suitRank = map[Suit]int{
 	Spades:   4,
 }
 
+var validRanks = map[Rank]bool{
+	Ace: true, King: true, Queen: true, Jack: true, Ten: true, Nine: true,
+	Eight: true, Seven: true, Six: true, Five: true, Four: true, Three: true, Two: true,
+}
+
 // Power constants for the Mighty engine, used to determine card strength in a trick.
 const (
 	// PowerMighty represents the strength of the Mighty card (highest).
@@ -189,8 +194,20 @@ func (g *Game) validateDiscard(p *Player, payload any) error {
 	return nil
 }
 
+// asCallPartnerMove normalizes the two accepted payload shapes.
+func asCallPartnerMove(payload any) (CallPartnerMove, error) {
+	switch v := payload.(type) {
+	case CallPartnerMove:
+		return v, nil
+	case Card:
+		return CallPartnerMove{Card: &v}, nil
+	default:
+		return CallPartnerMove{}, errors.New("invalid payload for partner call")
+	}
+}
+
 // validateCallPartner
-// Payload: Card (the partner card).
+// Payload: CallPartnerMove (or legacy Card).
 func (g *Game) validateCallPartner(p *Player, payload any) error {
 	if g.Status != PhaseCalling {
 		return fmt.Errorf("%w: not in calling phase", ErrInvalidMove)
@@ -200,11 +217,26 @@ func (g *Game) validateCallPartner(p *Player, payload any) error {
 		return fmt.Errorf("%w: only declarer call partner", ErrInvalidMove)
 	}
 
-	// Check payload
-	// It's just a card.
-	_, ok := payload.(Card)
-	if !ok {
-		return errors.New("invalid payload for partner call")
+	move, err := asCallPartnerMove(payload)
+	if err != nil {
+		return err
+	}
+
+	if move.Card != nil && move.NoFriend {
+		return fmt.Errorf("%w: choose a card or no_friend, not both", ErrInvalidMove)
+	}
+
+	if move.Card == nil && !move.NoFriend {
+		return fmt.Errorf("%w: call_partner requires a card or no_friend", ErrInvalidMove)
+	}
+
+	if move.Card != nil {
+		isJoker := move.Card.Suit == None && move.Card.Rank == Joker
+		if !isJoker {
+			if _, ok := suitRank[move.Card.Suit]; !ok || !validRanks[move.Card.Rank] {
+				return fmt.Errorf("%w: invalid partner card", ErrInvalidMove)
+			}
+		}
 	}
 
 	return nil
@@ -267,6 +299,16 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 			}
 		}
 
+		// Joker lead must declare the suit followers owe; called_suit is
+		// meaningless on any other play.
+		if card.Rank == Joker {
+			if _, ok := suitRank[move.CalledSuit]; !ok {
+				return fmt.Errorf("%w: joker lead requires called_suit", ErrInvalidMove)
+			}
+		} else if move.CalledSuit != "" {
+			return fmt.Errorf("%w: called_suit only valid when leading the joker", ErrInvalidMove)
+		}
+
 		// Joker Caller option
 		if move.CallJoker && !g.IsJokerCaller(card) {
 			return fmt.Errorf("%w: only joker caller can call joker", ErrInvalidMove)
@@ -277,6 +319,10 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 		}
 
 		return nil
+	}
+
+	if move.CalledSuit != "" {
+		return fmt.Errorf("%w: called_suit only valid when leading the joker", ErrInvalidMove)
 	}
 
 	// 3. Following Suit
@@ -378,17 +424,10 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 
 		bid.PlayerID = playerID // Ensure playerID is set
 
-		// If pass
-		if bid.Points == 0 {
-			p := g.GetPlayer(playerID)
-			if p != nil {
-				g.PassedPlayers[p.Seat] = true
-			}
-		} else {
-			g.CurrentBid = &bid
-			g.Declarer = p.Seat                  // Potential declarer
-			g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
-		}
+		g.CurrentBid = &bid
+		g.Declarer = p.Seat                  // Potential declarer
+		g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
+
 		// In rotation, move turn to next player?
 		// Or if everyone passes?
 		// Simplified: We assume bidding continues until 4 passes?
@@ -411,9 +450,18 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			declarer.Hand = append(declarer.Hand, g.Kitty...)
 			g.Kitty = nil // Empty kitty
 		} else if len(g.PassedPlayers) == 5 {
-			// Redeal?
-			// TODO: Implement redeal logic or just error/finish
-			g.Status = PhaseFinished
+			// Everyone passed: throw the hand in and redeal.
+			g.Bids = nil
+			g.CurrentBid = nil
+			g.Contract = nil
+			g.Declarer = -1
+			g.PassedPlayers = make(map[int]bool)
+			g.PartnerCard = nil
+			g.PartnerSeat = -1
+			g.IsNoFriend = false
+			g.Trump = ""
+			g.Tricks = make([]Trick, 0)
+			g.Start()
 		}
 
 	case MoveDiscard:
@@ -451,12 +499,18 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		g.Status = PhaseCalling
 
 	case MoveCallPartner:
-		card, ok := payload.(Card)
-		if !ok {
-			return errors.New("invalid payload for call partner")
+		move, err := asCallPartnerMove(payload)
+		if err != nil {
+			return err
 		}
 
-		g.PartnerCard = &card
+		if move.NoFriend {
+			g.IsNoFriend = true
+			g.PartnerCard = nil
+		} else {
+			g.PartnerCard = move.Card
+		}
+
 		g.Status = PhasePlaying
 		// Start playing
 		g.CurrentTurn = g.Declarer // Declarer leads first trick
@@ -496,15 +550,16 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			Card:     card,
 		})
 
+		// Reveal the mystery friend the moment the called card hits the table.
+		if g.PartnerCard != nil && card.Suit == g.PartnerCard.Suit && card.Rank == g.PartnerCard.Rank {
+			g.PartnerSeat = p.Seat
+		}
+
 		// Set Lead Suit if first card
 		if len(g.Tricks[idx].Cards) == 1 {
 			g.Tricks[idx].LeadSuit = card.Suit
-			// If Joker led, LeadSuit is whatever was passed?
-			// Actually Joker has no suit. The user said: "And if you begin the trick with the Joker, you have to specify the suit you want"
-			// So for Joker lead, we might need a JokerSuit in PlayCardMove.
-			// Let's assume Card.Suit is used to specify the suit for Joker lead.
 			if card.Rank == Joker {
-				g.Tricks[idx].LeadSuit = card.Suit
+				g.Tricks[idx].LeadSuit = move.CalledSuit
 			}
 
 			// Handle Joker Caller
@@ -688,8 +743,8 @@ func (g *Game) CalculateFinalScore() (float64, float64) {
 	}
 
 	friendScore := score / 2.0
-	if g.IsNoFriend {
-		friendScore = 0 // No friend to share with!
+	if g.IsNoFriend || g.PartnerSeat < 0 {
+		friendScore = 0 // No revealed friend to share with.
 	}
 
 	return score, friendScore
