@@ -148,26 +148,161 @@ func playingGameWithPartnerCard() *Game {
 	return g
 }
 
-func TestPlayingCalledCardRevealsPartner(t *testing.T) {
+// revealFixture builds a hearts-trump playing-phase game (declarer seat 0) on
+// its second trick, so the joker keeps power. `down` are the four cards already
+// played (Seat fields set), `lead` is the led suit, and `turn` is the seat about
+// to play the deciding fifth card. Callers set PartnerCard and the relevant hand.
+func revealFixture(turn int, down []PlayedCard, lead Suit) *Game {
+	g := callingGame()
+	g.Trump = Hearts
+	g.Status = PhasePlaying
+	g.CurrentTurn = turn
+	g.Tricks = []Trick{
+		{Winner: 0, Cards: []PlayedCard{}},
+		{LeadSuit: lead, Cards: down},
+	}
+
+	return g
+}
+
+func lowClubs() []PlayedCard {
+	return []PlayedCard{
+		{PlayerID: "p0", Seat: 0, Card: Card{Suit: Clubs, Rank: Two}},
+		{PlayerID: "p1", Seat: 1, Card: Card{Suit: Clubs, Rank: Three}},
+		{PlayerID: "p3", Seat: 3, Card: Card{Suit: Clubs, Rank: Four}},
+		{PlayerID: "p4", Seat: 4, Card: Card{Suit: Clubs, Rank: Five}},
+	}
+}
+
+func TestFriendRevealedWinningWithPointCard(t *testing.T) {
 	t.Parallel()
 
-	g := playingGameWithPartnerCard()
-	move := PlayCardMove{Card: Card{Suit: Diamonds, Rank: Ace}}
+	g := revealFixture(2, lowClubs(), Clubs)
+	g.PartnerCard = &Card{Suit: Clubs, Rank: King}
+	g.Players[2].Hand = []Card{{Suit: Clubs, Rank: King}}
 
-	if err := g.ValidateMove("p2", MovePlayCard, move); err != nil {
-		t.Fatalf("validate: %v", err)
+	if err := g.ApplyMove("p2", MovePlayCard, PlayCardMove{Card: Card{Suit: Clubs, Rank: King}}); err != nil {
+		t.Fatalf("apply: %v", err)
 	}
+
+	if g.PartnerSeat != 2 {
+		t.Fatalf("expected reveal to seat 2, got %d", g.PartnerSeat)
+	}
+}
+
+func TestFriendRevealedDefendingOpponentPointCard(t *testing.T) {
+	t.Parallel()
+
+	down := []PlayedCard{
+		{PlayerID: "p0", Seat: 0, Card: Card{Suit: Clubs, Rank: King}}, // opponent's point card
+		{PlayerID: "p1", Seat: 1, Card: Card{Suit: Clubs, Rank: Two}},
+		{PlayerID: "p3", Seat: 3, Card: Card{Suit: Clubs, Rank: Three}},
+		{PlayerID: "p4", Seat: 4, Card: Card{Suit: Clubs, Rank: Four}},
+	}
+	g := revealFixture(2, down, Clubs)
+	g.PartnerCard = &Card{Suit: Diamonds, Rank: Eight} // friend identity, stays in hand
+	g.Players[2].Hand = []Card{{Suit: Hearts, Rank: Seven}, {Suit: Diamonds, Rank: Eight}}
+
+	// Seat 2 is void in clubs and wins the trick with a trump (hearts).
+	if err := g.ApplyMove("p2", MovePlayCard, PlayCardMove{Card: Card{Suit: Hearts, Rank: Seven}}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if g.PartnerSeat != 2 {
+		t.Fatalf("expected reveal to seat 2 (defended ♣K), got %d", g.PartnerSeat)
+	}
+}
+
+func TestFriendRevealedWinningWithJoker(t *testing.T) {
+	t.Parallel()
+
+	g := revealFixture(2, lowClubs(), Clubs)
+	g.PartnerCard = &Card{Suit: Diamonds, Rank: Eight}
+	g.Players[2].Hand = []Card{{Suit: None, Rank: Joker}, {Suit: Diamonds, Rank: Eight}}
+
+	if err := g.ApplyMove("p2", MovePlayCard, PlayCardMove{Card: Card{Suit: None, Rank: Joker}}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if g.PartnerSeat != 2 {
+		t.Fatalf("expected reveal to seat 2 via joker, got %d", g.PartnerSeat)
+	}
+}
+
+func TestFriendNotRevealedWinningPointlessTrick(t *testing.T) {
+	t.Parallel()
+
+	g := revealFixture(2, lowClubs(), Clubs)
+	g.PartnerCard = &Card{Suit: Clubs, Rank: King}
+	g.Players[2].Hand = []Card{{Suit: Clubs, Rank: Nine}, {Suit: Clubs, Rank: King}}
+
+	// Seat 2 wins with ♣9 — no point card, no joker.
+	if err := g.ApplyMove("p2", MovePlayCard, PlayCardMove{Card: Card{Suit: Clubs, Rank: Nine}}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if g.PartnerSeat != -1 {
+		t.Fatalf("expected no reveal on a pointless win, got %d", g.PartnerSeat)
+	}
+}
+
+func TestNonFriendWinningPointTrickDoesNotReveal(t *testing.T) {
+	t.Parallel()
+
+	down := []PlayedCard{
+		{PlayerID: "p0", Seat: 0, Card: Card{Suit: Clubs, Rank: King}},
+		{PlayerID: "p1", Seat: 1, Card: Card{Suit: Clubs, Rank: Two}},
+		{PlayerID: "p2", Seat: 2, Card: Card{Suit: Clubs, Rank: Six}}, // the friend, already played and losing
+		{PlayerID: "p4", Seat: 4, Card: Card{Suit: Clubs, Rank: Four}},
+	}
+	g := revealFixture(3, down, Clubs)
+	g.PartnerCard = &Card{Suit: Clubs, Rank: Six} // friend = seat 2 (played ♣6)
+	g.Players[3].Hand = []Card{{Suit: Clubs, Rank: Ace}}
+
+	// Seat 3 (a non-friend) wins with ♣A.
+	if err := g.ApplyMove("p3", MovePlayCard, PlayCardMove{Card: Card{Suit: Clubs, Rank: Ace}}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if g.PartnerSeat != -1 {
+		t.Fatalf("expected no reveal when a non-friend wins, got %d", g.PartnerSeat)
+	}
+}
+
+func TestRevealIsMonotonic(t *testing.T) {
+	t.Parallel()
+
+	g := revealFixture(2, lowClubs(), Clubs)
+	g.PartnerCard = &Card{Suit: Clubs, Rank: King}
+	g.PartnerSeat = 2 // already revealed
+	g.Players[2].Hand = []Card{{Suit: Clubs, Rank: Nine}, {Suit: Clubs, Rank: King}}
+
+	// A later pointless win must not un-reveal.
+	if err := g.ApplyMove("p2", MovePlayCard, PlayCardMove{Card: Card{Suit: Clubs, Rank: Nine}}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if g.PartnerSeat != 2 {
+		t.Fatalf("reveal was lost, got %d", g.PartnerSeat)
+	}
+}
+
+func TestPlayingCalledCardAloneDoesNotReveal(t *testing.T) {
+	t.Parallel()
+
+	g := playingGameWithPartnerCard() // seat 2 leads ♦A into the open trick 2
+	move := PlayCardMove{Card: Card{Suit: Diamonds, Rank: Ace}}
 
 	if err := g.ApplyMove("p2", MovePlayCard, move); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
-	if g.PartnerSeat != 2 {
-		t.Fatalf("expected partner seat 2, got %d", g.PartnerSeat)
+	if g.PartnerSeat != -1 {
+		t.Fatalf("playing the called card must not reveal on its own, got %d", g.PartnerSeat)
 	}
 }
 
-func TestDeclarerPlayingOwnCalledCardIsSelfPartner(t *testing.T) {
+func TestDeclarerPlayingOwnCalledCardDoesNotRevealAlone(t *testing.T) {
 	t.Parallel()
 
 	g := playingGameWithPartnerCard()
@@ -180,8 +315,12 @@ func TestDeclarerPlayingOwnCalledCardIsSelfPartner(t *testing.T) {
 		t.Fatalf("apply: %v", err)
 	}
 
-	if g.PartnerSeat != 0 {
-		t.Fatalf("expected self-partner seat 0, got %d", g.PartnerSeat)
+	if g.PartnerSeat != -1 {
+		t.Fatalf("playing own called card must not reveal on its own, got %d", g.PartnerSeat)
+	}
+
+	if fs := g.friendSeat(); fs != 0 {
+		t.Fatalf("friendSeat() = %d, want 0 (declarer holds/played the called card)", fs)
 	}
 }
 

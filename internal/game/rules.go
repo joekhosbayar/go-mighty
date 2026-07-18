@@ -412,6 +412,23 @@ func (g *Game) friendSeat() int {
 	return -1
 }
 
+// trickRevealsFriend reports whether winning this trick outs the friend: it
+// holds a scoring card to defend, or the friend won it with the joker. (The
+// mighty is an Ace, so it already counts as a scoring card.)
+func trickRevealsFriend(t Trick, friendSeat int) bool {
+	for _, played := range t.Cards {
+		if played.Card.IsPointCard() {
+			return true
+		}
+
+		if played.Seat == friendSeat && played.Card.Rank == Joker {
+			return true
+		}
+	}
+
+	return false
+}
+
 // HasRank checks if a player has a card of the specified rank in their hand.
 func (p *Player) HasRank(r Rank) bool {
 	for _, c := range p.Hand {
@@ -626,11 +643,6 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			Card:     card,
 		})
 
-		// Reveal the mystery friend the moment the called card hits the table.
-		if g.PartnerCard != nil && card.Suit == g.PartnerCard.Suit && card.Rank == g.PartnerCard.Rank {
-			g.PartnerSeat = p.Seat
-		}
-
 		// Set Lead Suit if first card
 		if len(g.Tricks[idx].Cards) == 1 {
 			g.Tricks[idx].LeadSuit = card.Suit
@@ -651,6 +663,15 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		if len(g.Tricks[idx].Cards) == 5 {
 			winnerSeat, points := g.ResolveTrick(g.Tricks[idx])
 			g.Tricks[idx].Winner = winnerSeat
+
+			// Reveal the friend once they defend: they win a trick that holds a
+			// scoring card, or take it with the joker. A pointless win stays
+			// ambiguous, so it does not reveal.
+			if g.PartnerSeat < 0 {
+				if fs := g.friendSeat(); fs >= 0 && winnerSeat == fs && trickRevealsFriend(g.Tricks[idx], fs) {
+					g.PartnerSeat = fs
+				}
+			}
 
 			// Give points to winner
 			winner := g.Players[winnerSeat]
