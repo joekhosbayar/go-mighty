@@ -127,24 +127,8 @@ func (g *Game) validateBid(p *Player, payload any) error {
 
 	// Must be higher than current bid
 	if g.CurrentBid != nil {
-		if bid.Points < g.CurrentBid.Points {
-			return fmt.Errorf("%w: bid must be higher", ErrInvalidMove)
-		}
-
-		if bid.Points == g.CurrentBid.Points {
-			if g.CurrentBid.IsNoTrump && bid.IsNoTrump {
-				return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
-			}
-
-			if g.CurrentBid.IsNoTrump && !bid.IsNoTrump {
-				return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
-			}
-
-			if !bid.IsNoTrump && !g.CurrentBid.IsNoTrump {
-				if suitRank[bid.Suit] <= suitRank[g.CurrentBid.Suit] {
-					return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
-				}
-			}
+		if bid.Points <= g.CurrentBid.Points {
+			return fmt.Errorf("%w: bid must be strictly higher than current bid", ErrInvalidMove)
 		}
 	}
 

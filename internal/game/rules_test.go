@@ -51,10 +51,10 @@ func TestGameFlow(t *testing.T) {
 	_ = g.ApplyMove(g.Players[2].ID, MovePass, nil)
 	_ = g.ApplyMove(g.Players[3].ID, MovePass, nil)
 
-	// Player 4 attempts same-point lower-suit bid; should be rejected
-	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 7, Suit: Diamonds})
+	// Player 4 attempts a same-point bid; should be rejected
+	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 7, Suit: Spades})
 	if err == nil {
-		t.Errorf("Expected error for low bid")
+		t.Errorf("Expected error for same-point bid")
 	}
 
 	_ = g.ApplyMove(g.Players[4].ID, MovePass, nil)
@@ -364,5 +364,31 @@ func TestValidateBid_NoTrumpAndSuitValidation(t *testing.T) {
 	g.CurrentBid = &Bid{Points: 8, Suit: None, IsNoTrump: true}
 	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 8, Suit: None, IsNoTrump: true}); err == nil {
 		t.Fatalf("expected equal no-trump bid to be rejected")
+	}
+}
+
+func TestValidateBid_StrictlyIncreasing(t *testing.T) {
+	t.Parallel()
+	g := New("test-strict-bid")
+	g.Status = PhaseBidding
+	g.CurrentTurn = 0
+	g.Players[0] = &Player{ID: "P1", Seat: 0}
+
+	// Given a current bid of 7 Clubs
+	g.CurrentBid = &Bid{Points: 7, Suit: Clubs, IsNoTrump: false}
+
+	// A bid of 7 Spades (higher suit rank) should be rejected
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 7, Suit: Spades, IsNoTrump: false}); err == nil {
+		t.Fatalf("expected 7 Spades over 7 Clubs to be rejected (points must be strictly higher)")
+	}
+
+	// A bid of 7 No-Trump should be rejected
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 7, Suit: None, IsNoTrump: true}); err == nil {
+		t.Fatalf("expected 7 NT over 7 Clubs to be rejected (points must be strictly higher)")
+	}
+
+	// A bid of 8 Clubs should be accepted
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 8, Suit: Clubs, IsNoTrump: false}); err != nil {
+		t.Fatalf("expected 8 Clubs over 7 Clubs to be accepted, got: %v", err)
 	}
 }
