@@ -261,6 +261,19 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 
 	t := g.Tricks[currentTrickIdx]
 
+	// 0. Late-Game Special Card Forcing (Trick 8 and 9)
+	cardsLeft := len(p.Hand)
+	hasMighty := p.HasMighty(g)
+	hasJoker := p.HasRank(Joker)
+	isPlayingMightyOrJoker := g.IsMighty(card) || card.Rank == Joker
+
+	if cardsLeft == 3 && hasMighty && hasJoker && !isPlayingMightyOrJoker {
+		return fmt.Errorf("%w: must play mighty or joker on 3rd to last trick", ErrInvalidMove)
+	}
+	if cardsLeft == 2 && (hasMighty || hasJoker) && !isPlayingMightyOrJoker {
+		return fmt.Errorf("%w: must play mighty or joker on 2nd to last trick", ErrInvalidMove)
+	}
+
 	// 1. Forced Play (Joker Called)
 	if t.JokerCalled && p.HasRank(Joker) {
 		// "The only exception is that if the joker holder also has the mighty in which case she may choose to play the mighty"
@@ -273,13 +286,14 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 	if len(t.Cards) == 0 {
 		// First trick lead rules
 		if len(g.Tricks) == 1 {
-			// "The first card played must not be a trump card (unless all you have are trump cards)"
-			if card.Suit == g.Trump && p.HasNonTrump(g.Trump) {
-				// Exception: Mighty can be led anytime? Usually Mighty is "trump" but Ace of Spades.
-				// User says "first card must not be a trump card".
-				if !g.IsMighty(card) {
-					return fmt.Errorf("%w: cannot lead trump on first trick", ErrInvalidMove)
-				}
+			if card.Rank == Joker {
+				return fmt.Errorf("%w: cannot lead joker on first trick", ErrInvalidMove)
+			}
+			if g.IsMighty(card) {
+				return fmt.Errorf("%w: cannot lead mighty on first trick", ErrInvalidMove)
+			}
+			if card.Suit == g.Trump && p.HasNonTrumpMightyJoker(g) {
+				return fmt.Errorf("%w: cannot lead trump on first trick unless holding only trump/special cards", ErrInvalidMove)
 			}
 		}
 
@@ -311,17 +325,22 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 
 	// 3. Following Suit
 	lead := t.LeadSuit
+	// Special Rule: First Hand Restrictions
+	if len(g.Tricks) == 1 {
+		if card.Rank == Joker {
+			return fmt.Errorf("%w: cannot play joker on first trick", ErrInvalidMove)
+		}
+		if g.IsMighty(card) {
+			// Mighty can only be played if the led suit matches its base suit AND it is the only card of that suit
+			if lead != card.Suit || p.GetSuitCount(lead) > 1 {
+				return fmt.Errorf("%w: cannot play mighty on first trick unless it is your only card of the led suit", ErrInvalidMove)
+			}
+		}
+	}
+
 	if card.Suit != lead {
 		// Allowed if playing Mighty or Joker
 		if g.IsMighty(card) || card.Rank == Joker {
-			// Special Rule: First Hand Mighty Restriction
-			if len(g.Tricks) == 1 && g.IsMighty(card) {
-				// "cannot play mighty on your first hand, unless that is the only card you have that matches the lead suit"
-				if p.HasSuit(lead) {
-					return fmt.Errorf("%w: cannot play mighty on first trick if you can follow suit", ErrInvalidMove)
-				}
-			}
-
 			return nil
 		}
 
@@ -339,9 +358,9 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 // IsMighty checks if a card is the Mighty card given the current trump suit.
 func (g *Game) IsMighty(c Card) bool {
 	// Usually Ace of Spades.
-	// If Spades is Trump, Ace of Clubs is Mighty.
+	// If Spades is Trump, Ace of Diamonds is Mighty.
 	if g.Trump == Spades {
-		return c.Suit == Clubs && c.Rank == Ace
+		return c.Suit == Diamonds && c.Rank == Ace
 	}
 
 	return c.Suit == Spades && c.Rank == Ace
@@ -392,6 +411,37 @@ func (p *Player) HasNonTrump(trump Suit) bool {
 	}
 
 	return false
+}
+
+// HasMighty checks if a player holds the Mighty card.
+func (p *Player) HasMighty(g *Game) bool {
+	for _, c := range p.Hand {
+		if g.IsMighty(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasNonTrumpMightyJoker checks if a player has any cards that are NOT Trump, Mighty, or Joker.
+func (p *Player) HasNonTrumpMightyJoker(g *Game) bool {
+	for _, c := range p.Hand {
+		if c.Suit != g.Trump && !g.IsMighty(c) && c.Rank != Joker {
+			return true
+		}
+	}
+	return false
+}
+
+// GetSuitCount returns the number of cards the player holds of the given suit.
+func (p *Player) GetSuitCount(s Suit) int {
+	count := 0
+	for _, c := range p.Hand {
+		if c.Suit == s {
+			count++
+		}
+	}
+	return count
 }
 
 // ApplyMove applies the move to the game state

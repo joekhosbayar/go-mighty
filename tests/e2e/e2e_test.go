@@ -34,7 +34,7 @@ type apiFeature struct {
 	calledCard   *game.Card
 
 	// WebSocket subscriber state
-	wsConn     *websocket.Conn
+	wsConn      *websocket.Conn
 	wsLastEvent string
 }
 
@@ -262,42 +262,20 @@ func (a *apiFeature) waitForStatus(status string) error {
 
 func (a *apiFeature) findLegalCard(p *game.Player) game.Card {
 	trickIdx := len(a.game.Tricks) - 1
-	if trickIdx < 0 {
-		return p.Hand[0]
-	}
+	leading := trickIdx >= 0 && len(a.game.Tricks[trickIdx].Cards) == 0
 
-	currentTrick := a.game.Tricks[trickIdx]
-	if len(currentTrick.Cards) == 0 {
-		for _, c := range p.Hand {
-			if c.Rank == game.Joker && len(p.Hand) > 1 {
-				continue // leading the Joker needs called_suit; keep bots simple
-			}
+	for _, c := range p.Hand {
+		move := game.PlayCardMove{Card: c}
+		if leading && c.Rank == game.Joker {
+			move.CallJoker = true
+			move.CalledSuit = game.Hearts
+		}
 
-			if len(a.game.Tricks) == 1 && c.Suit == a.game.Trump {
-				hasNon := false
-
-				for _, c2 := range p.Hand {
-					if c2.Suit != a.game.Trump && c2.Rank != game.Joker {
-						hasNon = true
-						break
-					}
-				}
-
-				if hasNon {
-					continue
-				}
-			}
-
+		err := a.game.ValidateMove(p.ID, game.MovePlayCard, move)
+		if err == nil {
 			return c
 		}
-	} else {
-		for _, c := range p.Hand {
-			if c.Suit == currentTrick.LeadSuit {
-				return c
-			}
-		}
 	}
-
 	return p.Hand[0]
 }
 
@@ -334,7 +312,8 @@ func (a *apiFeature) playOutGame() error {
 			}
 
 			card := a.findLegalCard(p)
-			if err := a.move(name, game.MovePlayCard, a.playPayload(card)); err != nil {
+			err := a.move(name, game.MovePlayCard, a.playPayload(card))
+			if err != nil {
 				return err
 			}
 
