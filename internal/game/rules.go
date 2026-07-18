@@ -422,22 +422,12 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			declarer.Hand = append(declarer.Hand, g.Kitty...)
 			g.Kitty = nil
 		} else {
-			for {
-				g.CurrentTurn = (g.CurrentTurn + 1) % 5
-				if !g.PassedPlayers[g.CurrentTurn] {
-					break
-				}
-			}
+			g.advanceToNextBidder()
 		}
 
 	case MovePass:
 		g.PassedPlayers[p.Seat] = true
-		for {
-			g.CurrentTurn = (g.CurrentTurn + 1) % 5
-			if !g.PassedPlayers[g.CurrentTurn] {
-				break
-			}
-		}
+		g.advanceToNextBidder()
 		// Check if bidding ended
 		if len(g.PassedPlayers) == 4 && g.CurrentBid != nil {
 			g.Status = PhaseExchanging
@@ -784,5 +774,18 @@ func RankValue(r Rank) int {
 		return 0 // Joker value handled separately by power logic
 	default:
 		return 0
+	}
+}
+
+// advanceToNextBidder advances the current turn to the next player who has not passed.
+func (g *Game) advanceToNextBidder() {
+	if len(g.PassedPlayers) >= 5 {
+		return
+	}
+	for {
+		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		if !g.PassedPlayers[g.CurrentTurn] {
+			break
+		}
 	}
 }

@@ -483,3 +483,38 @@ func TestApplyMove_SkipPassedBidders(t *testing.T) {
 		t.Errorf("Expected current turn 3 (player 4) after skipping, got %d", g.CurrentTurn)
 	}
 }
+
+func TestApplyMove_AllFivePassRedeal(t *testing.T) {
+	t.Parallel()
+	g := New("test-redeal")
+	for i := range 5 {
+		p := &Player{ID: fmt.Sprintf("player%d", i+1), Seat: i, Name: fmt.Sprintf("P%d", i+1)}
+		g.Players[i] = p
+	}
+	g.Start()
+
+	initialVersion := g.Version
+
+	// All 5 players pass sequentially
+	for i := range 5 {
+		playerID := fmt.Sprintf("player%d", i+1)
+		err := g.ApplyMove(playerID, MovePass, nil)
+		if err != nil {
+			t.Fatalf("unexpected error on pass %d: %v", i+1, err)
+		}
+	}
+
+	// Should have redealt: meaning Phase is Bidding again, kitty is back, etc.
+	if g.Status != PhaseBidding {
+		t.Errorf("Expected PhaseBidding after 5 passes, got %s", g.Status)
+	}
+	if g.Version <= initialVersion {
+		t.Errorf("Expected version to increase")
+	}
+	if len(g.Kitty) != 3 {
+		t.Errorf("Expected kitty to be recreated with 3 cards, got %d", len(g.Kitty))
+	}
+	if len(g.PassedPlayers) != 0 {
+		t.Errorf("Expected passed players to be reset")
+	}
+}
