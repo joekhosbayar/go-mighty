@@ -410,7 +410,6 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 
 		g.CurrentBid = &bid
 		g.Declarer = p.Seat                  // Potential declarer
-		g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
 
 		if bid.Points == 10 {
 			// Auto-resolve if maximum bid is reached
@@ -423,12 +422,22 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			declarer.Hand = append(declarer.Hand, g.Kitty...)
 			g.Kitty = nil
 		} else {
-			g.CurrentTurn = (g.CurrentTurn + 1) % 5
+			for {
+				g.CurrentTurn = (g.CurrentTurn + 1) % 5
+				if !g.PassedPlayers[g.CurrentTurn] {
+					break
+				}
+			}
 		}
 
 	case MovePass:
 		g.PassedPlayers[p.Seat] = true
-		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		for {
+			g.CurrentTurn = (g.CurrentTurn + 1) % 5
+			if !g.PassedPlayers[g.CurrentTurn] {
+				break
+			}
+		}
 		// Check if bidding ended
 		if len(g.PassedPlayers) == 4 && g.CurrentBid != nil {
 			g.Status = PhaseExchanging

@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -418,5 +419,67 @@ func TestApplyMove_MaxBidAutoResolves(t *testing.T) {
 	}
 	if len(g.Kitty) != 0 {
 		t.Fatalf("expected kitty to be emptied into declarer's hand")
+	}
+}
+
+func TestApplyMove_SkipPassedBidders(t *testing.T) {
+	g := New("test-game")
+	// Add 5 players
+	for i := range 5 {
+		p := &Player{ID: fmt.Sprintf("player%d", i+1), Seat: i, Name: fmt.Sprintf("P%d", i+1)}
+		g.Players[i] = p
+	}
+	g.Start()
+
+	// Player 1 bids
+	bid1 := Bid{Suit: Clubs, Points: 3}
+	err := g.ApplyMove("player1", MoveBid, bid1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Player 2 passes
+	err = g.ApplyMove("player2", MovePass, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	
+	// Player 3 passes
+	err = g.ApplyMove("player3", MovePass, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Player 4 bids
+	bid2 := Bid{Suit: Diamonds, Points: 4}
+	err = g.ApplyMove("player4", MoveBid, bid2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// After player 4 bids, it should be player 5's turn
+	if g.CurrentTurn != 4 {
+		t.Errorf("Expected current turn 4 (player 5), got %d", g.CurrentTurn)
+	}
+
+	// Player 5 passes
+	err = g.ApplyMove("player5", MovePass, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Now it should be player 1's turn
+	if g.CurrentTurn != 0 {
+		t.Errorf("Expected current turn 0 (player 1), got %d", g.CurrentTurn)
+	}
+
+	// Player 1 passes, it should skip player 2 and 3 and be player 4's turn
+	err = g.ApplyMove("player1", MovePass, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if g.CurrentTurn != 3 {
+		t.Errorf("Expected current turn 3 (player 4) after skipping, got %d", g.CurrentTurn)
 	}
 }
