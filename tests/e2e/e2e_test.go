@@ -263,7 +263,6 @@ func (a *apiFeature) waitForStatus(status string) error {
 func (a *apiFeature) findLegalCard(p *game.Player) game.Card {
 	trickIdx := len(a.game.Tricks) - 1
 	leading := trickIdx >= 0 && len(a.game.Tricks[trickIdx].Cards) == 0
-	leading := trickIdx >= 0 && len(a.game.Tricks[trickIdx].Cards) == 0
 
 	for _, c := range p.Hand {
 		move := game.PlayCardMove{Card: c}
