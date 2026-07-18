@@ -325,7 +325,6 @@ func TestScoring(t *testing.T) {
 
 	// Test No-Friend Multiplier
 	g.IsNoFriend = true
-	g.PartnerSeat = -1
 
 	score, friendScore = g.CalculateFinalScore()
 	if score != 300 { // 150 * 2
