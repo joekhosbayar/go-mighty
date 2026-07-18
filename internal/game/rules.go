@@ -394,6 +394,37 @@ func (p *Player) HasNonTrump(trump Suit) bool {
 	return false
 }
 
+// HasMighty checks if a player holds the Mighty card.
+func (p *Player) HasMighty(g *Game) bool {
+	for _, c := range p.Hand {
+		if g.IsMighty(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasNonTrumpMightyJoker checks if a player has any cards that are NOT Trump, Mighty, or Joker.
+func (p *Player) HasNonTrumpMightyJoker(g *Game) bool {
+	for _, c := range p.Hand {
+		if c.Suit != g.Trump && !g.IsMighty(c) && c.Rank != Joker {
+			return true
+		}
+	}
+	return false
+}
+
+// GetSuitCount returns the number of cards the player holds of the given suit.
+func (p *Player) GetSuitCount(s Suit) int {
+	count := 0
+	for _, c := range p.Hand {
+		if c.Suit == s {
+			count++
+		}
+	}
+	return count
+}
+
 // ApplyMove applies the move to the game state
 // Assumes ValidateMove has already been called.
 func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error {
