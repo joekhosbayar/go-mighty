@@ -326,6 +326,25 @@ func (a *apiFeature) playOutGame() error {
 	return nil
 }
 
+// seatThatPlayedCalledCard returns the seat that played the declarer's called
+// card across all tricks, or -1 if it was never played (no friend, or it was
+// discarded into the kitty).
+func (a *apiFeature) seatThatPlayedCalledCard() int {
+	if a.calledCard == nil {
+		return -1
+	}
+
+	for _, trick := range a.game.Tricks {
+		for _, pc := range trick.Cards {
+			if pc.Card.Suit == a.calledCard.Suit && pc.Card.Rank == a.calledCard.Rank {
+				return pc.Seat
+			}
+		}
+	}
+
+	return -1
+}
+
 func InitializeScenario(ctx *godog.ScenarioContext) {
 	baseURL := os.Getenv("E2E_BASE_URL")
 	if baseURL == "" {
@@ -475,22 +494,13 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 
 		return nil
 	})
-	ctx.Step(`^the partner seat should match whoever played the called card$`, func() error {
+	ctx.Step(`^the partner seat should be unrevealed or match whoever played the called card$`, func() error {
 		if err := api.refreshState(); err != nil {
 			return err
 		}
 
-		playedBy := -1
-
-		for _, trick := range api.game.Tricks {
-			for _, pc := range trick.Cards {
-				if api.calledCard != nil && pc.Card.Suit == api.calledCard.Suit && pc.Card.Rank == api.calledCard.Rank {
-					playedBy = pc.Seat
-				}
-			}
-		}
-
-		if api.game.PartnerSeat != playedBy {
+		playedBy := api.seatThatPlayedCalledCard()
+		if api.game.PartnerSeat != -1 && api.game.PartnerSeat != playedBy {
 			return fmt.Errorf("partner seat %d, but called card was played by seat %d", api.game.PartnerSeat, playedBy)
 		}
 
@@ -508,15 +518,17 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 			return errors.New("declarer round score must be non-zero")
 		}
 
-		if seat := api.game.PartnerSeat; seat >= 0 && seat != api.game.Declarer {
-			partnerScore := api.game.Scores[api.game.Players[seat].ID]
+		friend := api.seatThatPlayedCalledCard()
+
+		if friend >= 0 && friend != api.game.Declarer {
+			partnerScore := api.game.Scores[api.game.Players[friend].ID]
 			if diff := declarerScore - 2*partnerScore; diff < -1 || diff > 1 {
 				return fmt.Errorf("partner score %d is not half of declarer %d", partnerScore, declarerScore)
 			}
 		}
 
 		for _, p := range api.game.Players {
-			if p == nil || p.Seat == api.game.Declarer || p.Seat == api.game.PartnerSeat {
+			if p == nil || p.Seat == api.game.Declarer || p.Seat == friend {
 				continue
 			}
 

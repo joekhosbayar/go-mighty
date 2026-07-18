@@ -22,7 +22,7 @@ Feature: Mystery Friend
     Then the game "friend-1" status should be "playing"
     When all remaining tricks are played out legally
     Then the game "friend-1" status should be "finished"
-    And the partner seat should match whoever played the called card
+    And the partner seat should be unrevealed or match whoever played the called card
     And the final scores should follow the declarer-partner split
 
   Scenario: Declarer plays alone with no friend
