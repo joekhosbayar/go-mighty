@@ -412,11 +412,19 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		g.Declarer = p.Seat                  // Potential declarer
 		g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
 
-		// In rotation, move turn to next player?
-		// Or if everyone passes?
-		// Simplified: We assume bidding continues until 4 passes?
-		// For now simple implementation: Just set bid and move turn.
-		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		if bid.Points == 10 {
+			// Auto-resolve if maximum bid is reached
+			g.Status = PhaseExchanging
+			g.Contract = g.CurrentBid
+			g.Trump = g.Contract.Suit
+			g.CurrentTurn = g.Declarer
+
+			declarer := g.Players[g.Declarer]
+			declarer.Hand = append(declarer.Hand, g.Kitty...)
+			g.Kitty = nil
+		} else {
+			g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		}
 
 	case MovePass:
 		g.PassedPlayers[p.Seat] = true

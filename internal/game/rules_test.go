@@ -392,3 +392,31 @@ func TestValidateBid_StrictlyIncreasing(t *testing.T) {
 		t.Fatalf("expected 8 Clubs over 7 Clubs to be accepted, got: %v", err)
 	}
 }
+
+func TestApplyMove_MaxBidAutoResolves(t *testing.T) {
+	t.Parallel()
+	g := New("test-max-bid")
+	for i := range 5 {
+		g.Players[i] = &Player{ID: string(rune('A' + i)), Seat: i, Name: string(rune('A' + i))}
+	}
+	g.Start() // deals cards and sets PhaseBidding
+
+	playerID := g.Players[g.CurrentTurn].ID
+	err := g.ApplyMove(playerID, MoveBid, Bid{Points: 10, Suit: Spades, IsNoTrump: false})
+	if err != nil {
+		t.Fatalf("failed to apply 10 point bid: %v", err)
+	}
+
+	if g.Status != PhaseExchanging {
+		t.Fatalf("expected phase to immediately become PhaseExchanging, got %s", g.Status)
+	}
+	if g.Declarer != g.GetPlayer(playerID).Seat {
+		t.Fatalf("expected declarer to be set correctly")
+	}
+	if g.Contract == nil || g.Contract.Points != 10 {
+		t.Fatalf("expected contract to be finalized")
+	}
+	if len(g.Kitty) != 0 {
+		t.Fatalf("expected kitty to be emptied into declarer's hand")
+	}
+}
