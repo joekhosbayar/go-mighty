@@ -127,24 +127,8 @@ func (g *Game) validateBid(p *Player, payload any) error {
 
 	// Must be higher than current bid
 	if g.CurrentBid != nil {
-		if bid.Points < g.CurrentBid.Points {
-			return fmt.Errorf("%w: bid must be higher", ErrInvalidMove)
-		}
-
-		if bid.Points == g.CurrentBid.Points {
-			if g.CurrentBid.IsNoTrump && bid.IsNoTrump {
-				return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
-			}
-
-			if g.CurrentBid.IsNoTrump && !bid.IsNoTrump {
-				return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
-			}
-
-			if !bid.IsNoTrump && !g.CurrentBid.IsNoTrump {
-				if suitRank[bid.Suit] <= suitRank[g.CurrentBid.Suit] {
-					return fmt.Errorf("%w: insufficient bid to raise", ErrInvalidMove)
-				}
-			}
+		if bid.Points <= g.CurrentBid.Points {
+			return fmt.Errorf("%w: bid must be strictly higher than current bid", ErrInvalidMove)
 		}
 	}
 
@@ -426,17 +410,24 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 
 		g.CurrentBid = &bid
 		g.Declarer = p.Seat                  // Potential declarer
-		g.PassedPlayers = make(map[int]bool) // Clear passes when someone bids
 
-		// In rotation, move turn to next player?
-		// Or if everyone passes?
-		// Simplified: We assume bidding continues until 4 passes?
-		// For now simple implementation: Just set bid and move turn.
-		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		if bid.Points == 10 || len(g.PassedPlayers) == 4 {
+			// Auto-resolve if maximum bid is reached or all others passed
+			g.Status = PhaseExchanging
+			g.Contract = g.CurrentBid
+			g.Trump = g.Contract.Suit
+			g.CurrentTurn = g.Declarer
+
+			declarer := g.Players[g.Declarer]
+			declarer.Hand = append(declarer.Hand, g.Kitty...)
+			g.Kitty = nil
+		} else {
+			g.advanceToNextBidder()
+		}
 
 	case MovePass:
 		g.PassedPlayers[p.Seat] = true
-		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		g.advanceToNextBidder()
 		// Check if bidding ended
 		if len(g.PassedPlayers) == 4 && g.CurrentBid != nil {
 			g.Status = PhaseExchanging
@@ -783,5 +774,18 @@ func RankValue(r Rank) int {
 		return 0 // Joker value handled separately by power logic
 	default:
 		return 0
+	}
+}
+
+// advanceToNextBidder advances the current turn to the next player who has not passed.
+func (g *Game) advanceToNextBidder() {
+	if len(g.PassedPlayers) >= 5 {
+		return
+	}
+	for {
+		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		if !g.PassedPlayers[g.CurrentTurn] {
+			break
+		}
 	}
 }

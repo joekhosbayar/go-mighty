@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -51,10 +52,10 @@ func TestGameFlow(t *testing.T) {
 	_ = g.ApplyMove(g.Players[2].ID, MovePass, nil)
 	_ = g.ApplyMove(g.Players[3].ID, MovePass, nil)
 
-	// Player 4 attempts same-point lower-suit bid; should be rejected
-	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 7, Suit: Diamonds})
+	// Player 4 attempts a same-point bid; should be rejected
+	err = g.ValidateMove(g.Players[4].ID, MoveBid, Bid{Points: 7, Suit: Spades})
 	if err == nil {
-		t.Errorf("Expected error for low bid")
+		t.Errorf("Expected error for same-point bid")
 	}
 
 	_ = g.ApplyMove(g.Players[4].ID, MovePass, nil)
@@ -364,5 +365,191 @@ func TestValidateBid_NoTrumpAndSuitValidation(t *testing.T) {
 	g.CurrentBid = &Bid{Points: 8, Suit: None, IsNoTrump: true}
 	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 8, Suit: None, IsNoTrump: true}); err == nil {
 		t.Fatalf("expected equal no-trump bid to be rejected")
+	}
+}
+
+func TestValidateBid_StrictlyIncreasing(t *testing.T) {
+	t.Parallel()
+	g := New("test-strict-bid")
+	g.Status = PhaseBidding
+	g.CurrentTurn = 0
+	g.Players[0] = &Player{ID: "P1", Seat: 0}
+
+	// Given a current bid of 7 Clubs
+	g.CurrentBid = &Bid{Points: 7, Suit: Clubs, IsNoTrump: false}
+
+	// A bid of 7 Spades (higher suit rank) should be rejected
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 7, Suit: Spades, IsNoTrump: false}); err == nil {
+		t.Fatalf("expected 7 Spades over 7 Clubs to be rejected (points must be strictly higher)")
+	}
+
+	// A bid of 7 No-Trump should be rejected
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 7, Suit: None, IsNoTrump: true}); err == nil {
+		t.Fatalf("expected 7 NT over 7 Clubs to be rejected (points must be strictly higher)")
+	}
+
+	// A bid of 8 Clubs should be accepted
+	if err := g.ValidateMove("P1", MoveBid, Bid{Points: 8, Suit: Clubs, IsNoTrump: false}); err != nil {
+		t.Fatalf("expected 8 Clubs over 7 Clubs to be accepted, got: %v", err)
+	}
+}
+
+func TestApplyMove_MaxBidAutoResolves(t *testing.T) {
+	t.Parallel()
+	g := New("test-max-bid")
+	for i := range 5 {
+		g.Players[i] = &Player{ID: string(rune('A' + i)), Seat: i, Name: string(rune('A' + i))}
+	}
+	g.Start() // deals cards and sets PhaseBidding
+
+	playerID := g.Players[g.CurrentTurn].ID
+	err := g.ApplyMove(playerID, MoveBid, Bid{Points: 10, Suit: Spades, IsNoTrump: false})
+	if err != nil {
+		t.Fatalf("failed to apply 10 point bid: %v", err)
+	}
+
+	if g.Status != PhaseExchanging {
+		t.Fatalf("expected phase to immediately become PhaseExchanging, got %s", g.Status)
+	}
+	if g.Declarer != g.GetPlayer(playerID).Seat {
+		t.Fatalf("expected declarer to be set correctly")
+	}
+	if g.Contract == nil || g.Contract.Points != 10 {
+		t.Fatalf("expected contract to be finalized")
+	}
+	if len(g.Kitty) != 0 {
+		t.Fatalf("expected kitty to be emptied into declarer's hand")
+	}
+}
+
+func TestApplyMove_SkipPassedBidders(t *testing.T) {
+	g := New("test-game")
+	// Add 5 players
+	for i := range 5 {
+		p := &Player{ID: fmt.Sprintf("player%d", i+1), Seat: i, Name: fmt.Sprintf("P%d", i+1)}
+		g.Players[i] = p
+	}
+	g.Start()
+
+	// Player 1 bids
+	bid1 := Bid{Suit: Clubs, Points: 3}
+	err := g.ApplyMove("player1", MoveBid, bid1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Player 2 passes
+	err = g.ApplyMove("player2", MovePass, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	
+	// Player 3 passes
+	err = g.ApplyMove("player3", MovePass, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Player 4 bids
+	bid2 := Bid{Suit: Diamonds, Points: 4}
+	err = g.ApplyMove("player4", MoveBid, bid2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// After player 4 bids, it should be player 5's turn
+	if g.CurrentTurn != 4 {
+		t.Errorf("Expected current turn 4 (player 5), got %d", g.CurrentTurn)
+	}
+
+	// Player 5 passes
+	err = g.ApplyMove("player5", MovePass, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Now it should be player 1's turn
+	if g.CurrentTurn != 0 {
+		t.Errorf("Expected current turn 0 (player 1), got %d", g.CurrentTurn)
+	}
+
+	// Player 1 passes, it should skip player 2 and 3 and be player 4's turn
+	err = g.ApplyMove("player1", MovePass, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if g.CurrentTurn != 3 {
+		t.Errorf("Expected current turn 3 (player 4) after skipping, got %d", g.CurrentTurn)
+	}
+}
+
+func TestApplyMove_AllFivePassRedeal(t *testing.T) {
+	t.Parallel()
+	g := New("test-redeal")
+	for i := range 5 {
+		p := &Player{ID: fmt.Sprintf("player%d", i+1), Seat: i, Name: fmt.Sprintf("P%d", i+1)}
+		g.Players[i] = p
+	}
+	g.Start()
+
+	initialVersion := g.Version
+
+	// All 5 players pass sequentially
+	for i := range 5 {
+		playerID := fmt.Sprintf("player%d", i+1)
+		err := g.ApplyMove(playerID, MovePass, nil)
+		if err != nil {
+			t.Fatalf("unexpected error on pass %d: %v", i+1, err)
+		}
+	}
+
+	// Should have redealt: meaning Phase is Bidding again, kitty is back, etc.
+	if g.Status != PhaseBidding {
+		t.Errorf("Expected PhaseBidding after 5 passes, got %s", g.Status)
+	}
+	if g.Version <= initialVersion {
+		t.Errorf("Expected version to increase")
+	}
+	if len(g.Kitty) != 3 {
+		t.Errorf("Expected kitty to be recreated with 3 cards, got %d", len(g.Kitty))
+	}
+	if len(g.PassedPlayers) != 0 {
+		t.Errorf("Expected passed players to be reset")
+	}
+}
+
+func TestApplyMove_FourPassThenBid(t *testing.T) {
+	g := New("test-game-four-pass-then-bid")
+	for i := range 5 {
+		p := &Player{ID: fmt.Sprintf("player%d", i+1), Seat: i, Name: fmt.Sprintf("P%d", i+1)}
+		g.Players[i] = p
+	}
+	g.Start()
+
+	// Players 1, 2, 3, 4 pass
+	for i := range 4 {
+		playerID := fmt.Sprintf("player%d", i+1)
+		err := g.ApplyMove(playerID, MovePass, nil)
+		if err != nil {
+			t.Fatalf("unexpected error on pass %d: %v", i+1, err)
+		}
+	}
+
+	// Player 5 makes a bid under 10 (e.g. 5)
+	err := g.ApplyMove("player5", MoveBid, Bid{Suit: Spades, Points: 5})
+	if err != nil {
+		t.Fatalf("unexpected error on bid: %v", err)
+	}
+
+	// The game should enter PhaseExchanging immediately
+	if g.Status != PhaseExchanging {
+		t.Errorf("Expected Exchanging phase, got %s", g.Status)
+	}
+	if g.Declarer != 4 {
+		t.Errorf("Expected Declarer to be 4 (Player 5), got %d", g.Declarer)
+	}
+	if g.CurrentBid.Points != 5 {
+		t.Errorf("Expected bid to be 5, got %d", g.CurrentBid.Points)
 	}
 }

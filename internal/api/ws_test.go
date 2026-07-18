@@ -173,12 +173,8 @@ func TestWSHandler_RejectEarlyData(t *testing.T) {
 
 	extraData := []byte{0x81, 0x05, 'h', 'e', 'l', 'l', 'o'}
 
-	if _, err = conn.Write([]byte(req)); err != nil {
-		t.Fatalf("Failed to write request: %v", err)
-	}
-
-	if _, err = conn.Write(extraData); err != nil {
-		t.Fatalf("Failed to write extra data: %v", err)
+	if _, err = conn.Write(append([]byte(req), extraData...)); err != nil {
+		t.Fatalf("Failed to write request with early data: %v", err)
 	}
 
 	reader := bufio.NewReader(conn)
