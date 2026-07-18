@@ -261,6 +261,19 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 
 	t := g.Tricks[currentTrickIdx]
 
+	// 0. Late-Game Special Card Forcing (Trick 8 and 9)
+	cardsLeft := len(p.Hand)
+	hasMighty := p.HasMighty(g)
+	hasJoker := p.HasRank(Joker)
+	isPlayingMightyOrJoker := g.IsMighty(card) || card.Rank == Joker
+
+	if cardsLeft == 3 && hasMighty && hasJoker && !isPlayingMightyOrJoker {
+		return fmt.Errorf("%w: must play mighty or joker on 3rd to last trick", ErrInvalidMove)
+	}
+	if cardsLeft == 2 && (hasMighty || hasJoker) && !isPlayingMightyOrJoker {
+		return fmt.Errorf("%w: must play mighty or joker on 2nd to last trick", ErrInvalidMove)
+	}
+
 	// 1. Forced Play (Joker Called)
 	if t.JokerCalled && p.HasRank(Joker) {
 		// "The only exception is that if the joker holder also has the mighty in which case she may choose to play the mighty"

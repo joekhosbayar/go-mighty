@@ -33,3 +33,29 @@ func TestPlayerHelpers(t *testing.T) {
 	assert.True(t, p.HasNonTrumpMightyJoker(g))
 	assert.Equal(t, 1, p.GetSuitCount(Clubs))
 }
+
+func TestLateGameSpecialForcing(t *testing.T) {
+	g := New("test")
+	g.Trump = Hearts
+	g.Status = PhasePlaying
+	p := &Player{ID: "p1", Hand: []Card{
+		{Suit: Spades, Rank: Ace}, // Mighty
+		{Suit: Clubs, Rank: Five},
+	}}
+	g.Players[0] = p
+	g.CurrentTurn = 0
+	g.Tricks = []Trick{{LeadSuit: Clubs}} // Active trick, 9th trick (since hand has 2 cards left)
+
+	// Trying to follow suit with 2 cards left and holding Mighty MUST fail.
+	err := g.ValidateMove("p1", MovePlayCard, PlayCardMove{Card: Card{Suit: Clubs, Rank: Five}})
+	assert.ErrorContains(t, err, "must play mighty or joker")
+
+	// Playing Mighty is allowed and forced.
+	err = g.ValidateMove("p1", MovePlayCard, PlayCardMove{Card: Card{Suit: Spades, Rank: Ace}})
+	assert.NoError(t, err)
+
+	p.Hand = []Card{{Suit: Spades, Rank: Ace}, {Suit: None, Rank: Joker}, {Suit: Clubs, Rank: Five}}
+	// 3 cards left, holding BOTH. Must play one.
+	err = g.ValidateMove("p1", MovePlayCard, PlayCardMove{Card: Card{Suit: Clubs, Rank: Five}})
+	assert.ErrorContains(t, err, "must play mighty or joker")
+}
