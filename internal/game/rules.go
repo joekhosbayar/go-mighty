@@ -377,6 +377,41 @@ func (g *Game) IsJokerCaller(c Card) bool {
 	return c.Suit == Clubs && c.Rank == Three
 }
 
+// friendSeat returns the seat of the mystery friend (the holder of the called
+// partner card), or -1 when there is no friend or the card is unheld (e.g. the
+// declarer discarded it into the kitty before calling). It scans current hands
+// and every played trick card, so it is correct at any point after the friend
+// is called and needs no stored field — it survives Redis reloads for free.
+func (g *Game) friendSeat() int {
+	if g.IsNoFriend || g.PartnerCard == nil {
+		return -1
+	}
+
+	pc := *g.PartnerCard
+
+	for _, p := range g.Players {
+		if p == nil {
+			continue
+		}
+
+		for _, c := range p.Hand {
+			if c.Suit == pc.Suit && c.Rank == pc.Rank {
+				return p.Seat
+			}
+		}
+	}
+
+	for _, t := range g.Tricks {
+		for _, played := range t.Cards {
+			if played.Card.Suit == pc.Suit && played.Card.Rank == pc.Rank {
+				return played.Seat
+			}
+		}
+	}
+
+	return -1
+}
+
 // HasRank checks if a player has a card of the specified rank in their hand.
 func (p *Player) HasRank(r Rank) bool {
 	for _, c := range p.Hand {

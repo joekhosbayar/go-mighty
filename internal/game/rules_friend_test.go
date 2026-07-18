@@ -271,3 +271,55 @@ func TestScoringCountsRevealedPartnerTricks(t *testing.T) {
 		})
 	}
 }
+
+func TestFriendSeatFindsCardInHand(t *testing.T) {
+	t.Parallel()
+
+	g := callingGame()
+	g.PartnerCard = &Card{Suit: Hearts, Rank: King}
+	g.Players[3].Hand = []Card{{Suit: Clubs, Rank: Two}, {Suit: Hearts, Rank: King}}
+
+	if got := g.friendSeat(); got != 3 {
+		t.Fatalf("friendSeat() = %d, want 3", got)
+	}
+}
+
+func TestFriendSeatFindsCardAlreadyPlayed(t *testing.T) {
+	t.Parallel()
+
+	g := callingGame()
+	g.PartnerCard = &Card{Suit: Hearts, Rank: King}
+	g.Tricks = []Trick{{
+		Winner:   2,
+		LeadSuit: Clubs,
+		Cards: []PlayedCard{
+			{PlayerID: "p1", Seat: 1, Card: Card{Suit: Clubs, Rank: Nine}},
+			{PlayerID: "p2", Seat: 2, Card: Card{Suit: Hearts, Rank: King}},
+		},
+	}}
+
+	if got := g.friendSeat(); got != 2 {
+		t.Fatalf("friendSeat() = %d, want 2", got)
+	}
+}
+
+func TestFriendSeatNoFriendOrUnheld(t *testing.T) {
+	t.Parallel()
+
+	noFriend := callingGame()
+	noFriend.IsNoFriend = true
+	if got := noFriend.friendSeat(); got != -1 {
+		t.Fatalf("no-friend friendSeat() = %d, want -1", got)
+	}
+
+	nilCard := callingGame()
+	if got := nilCard.friendSeat(); got != -1 {
+		t.Fatalf("nil partner card friendSeat() = %d, want -1", got)
+	}
+
+	unheld := callingGame()
+	unheld.PartnerCard = &Card{Suit: Hearts, Rank: King} // held by nobody, not yet played
+	if got := unheld.friendSeat(); got != -1 {
+		t.Fatalf("unheld friendSeat() = %d, want -1", got)
+	}
+}
