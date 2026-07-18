@@ -65,3 +65,35 @@ Feature: Special Card Mechanics
     And "Bob" has the "Ace of Spades" (Mighty) and "2 of Hearts" (Lead Suit)
     When "Bob" attempts to play the "Ace of Spades"
     Then the move should be rejected as "cannot play mighty on first trick unless it is your only card of the led suit"
+
+  Scenario: First Hand Joker Play Restriction
+    Given it is Trick 1
+    And "Alice" leads the "King of Hearts"
+    And "Bob" has the "Joker"
+    When "Bob" attempts to play the "Joker"
+    Then the move should be rejected as "cannot play joker on first trick"
+
+  Scenario: Mighty switches to Ace of Diamonds when Spades is Trump
+    Given it is Trick 5
+    And the trump suit is "spades"
+    When "Bob" leads the "King of Hearts"
+    And "Carol" plays the "Joker"
+    And "Dave" plays the "Ace of Diamonds" (Mighty)
+    Then the "Ace of Diamonds" should win the trick
+
+  Scenario: Late Game Special Card Forcing Trick 8
+    Given it is Trick 8
+    And the trump suit is "hearts"
+    And "Alice" has the "Ace of Spades"
+    And "Alice" has the "Joker"
+    And "Alice" has the "2 of Clubs"
+    When "Alice" attempts to play the "2 of Clubs"
+    Then the move should be rejected as "must play mighty or joker on 3rd to last trick"
+
+  Scenario: Late Game Special Card Forcing Trick 9
+    Given it is Trick 9
+    And the trump suit is "hearts"
+    And "Alice" has the "Ace of Spades"
+    And "Alice" has the "2 of Clubs"
+    When "Alice" attempts to play the "2 of Clubs"
+    Then the move should be rejected as "must play mighty or joker on 2nd to last trick"

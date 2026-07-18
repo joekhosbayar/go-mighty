@@ -20,7 +20,7 @@ During the first trick of the game (`len(g.Tricks) == 1`), specific restrictions
 ### 3.2. Following Players
 - **No Joker**: Following players cannot play the Joker.
 - **No Mighty**: Following players cannot play the Mighty.
-  - **Exception**: If the trick opener led the base suit of the Mighty (e.g., Spades), AND the Mighty is the *only* card the player has of that suit, they are permitted to play the Mighty.
+  - **Exception**: If the trick opener led the base suit of the Mighty (e.g., Ace of Spades or Diamonds), AND the Mighty is the *only* card the player has of that suit, they are permitted to play the Mighty.
 - **No Trump**: Following players cannot play a Trump card.
   - **Exception**: If the player is void in the led suit, they are permitted to play a Trump card (standard ruffing).
 
