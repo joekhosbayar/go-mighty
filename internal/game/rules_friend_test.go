@@ -383,10 +383,10 @@ func TestScoringCountsRevealedPartnerTricks(t *testing.T) {
 			}
 
 			g.IsNoFriend = tc.noFriend
-			g.PartnerSeat = 1
-			if tc.noFriend {
-				g.PartnerSeat = -1
-			}
+			// Friend is seat 1: place the called card in seat 1's hand so
+			// friendSeat() resolves to 1 (noFriend still forces -1).
+			g.PartnerCard = &Card{Suit: Hearts, Rank: King}
+			g.Players[1].Hand = []Card{{Suit: Hearts, Rank: King}}
 
 			g.Tricks = make([]Trick, 10)
 			seat := 0

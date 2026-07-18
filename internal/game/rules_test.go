@@ -290,7 +290,10 @@ func TestScoring(t *testing.T) {
 	t.Parallel()
 	g := New("test-scoring")
 	g.Declarer = 0
-	g.PartnerSeat = 1
+	// Friend is seat 1: place the called card in seat 1's hand so friendSeat()
+	// resolves to 1 (scoring no longer reads PartnerSeat).
+	g.PartnerCard = &Card{Suit: Hearts, Rank: King}
+	g.Players[1] = &Player{ID: "p1", Seat: 1, Hand: []Card{{Suit: Hearts, Rank: King}}}
 	g.Contract = &Bid{Points: 7, Suit: Spades, IsNoTrump: false}
 
 	// Simulate 8 tricks won by team (Declarer + Partner)

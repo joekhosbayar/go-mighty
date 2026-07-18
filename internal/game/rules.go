@@ -696,8 +696,8 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 					g.Scores[g.Players[g.Declarer].ID] = int(declarerScore)
 				}
 
-				if g.PartnerSeat >= 0 && g.PartnerSeat < len(g.Players) && g.Players[g.PartnerSeat] != nil {
-					g.Scores[g.Players[g.PartnerSeat].ID] = int(partnerScore)
+				if fs := g.friendSeat(); fs >= 0 && fs < len(g.Players) && g.Players[fs] != nil {
+					g.Scores[g.Players[fs].ID] = int(partnerScore)
 				}
 			} else {
 				g.Tricks = append(g.Tricks, Trick{Cards: []PlayedCard{}})
@@ -789,11 +789,13 @@ func (g *Game) CalculateFinalScore() (float64, float64) {
 		return 0, 0
 	}
 
-	// Let's count tricks won by the caller team
+	fs := g.friendSeat()
+
+	// Count tricks won by the caller team (declarer + friend).
 	tricksWon := 0
 
 	for _, t := range g.Tricks {
-		if t.Winner == g.Declarer || t.Winner == g.PartnerSeat {
+		if t.Winner == g.Declarer || t.Winner == fs {
 			tricksWon++
 		}
 	}
@@ -840,8 +842,8 @@ func (g *Game) CalculateFinalScore() (float64, float64) {
 	}
 
 	friendScore := score / 2.0
-	if g.IsNoFriend || g.PartnerSeat < 0 {
-		friendScore = 0 // No revealed friend to share with.
+	if g.IsNoFriend || fs < 0 {
+		friendScore = 0 // No friend to share with.
 	}
 
 	return score, friendScore
