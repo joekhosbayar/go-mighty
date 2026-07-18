@@ -224,7 +224,7 @@ func TestJokerCallerForce(t *testing.T) {
 	}}
 	g.Status = PhasePlaying
 	g.CurrentTurn = 1
-	g.Tricks = []Trick{{
+	g.Tricks = []Trick{{}, {
 		Cards: []PlayedCard{
 			{PlayerID: "P1", Seat: 0, Card: Card{Suit: Clubs, Rank: Three}},
 		},
@@ -274,15 +274,15 @@ func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
 		t.Fatalf("expected first-trick mighty rejection when player can follow suit")
 	}
 
-	// No lead suit available, so Mighty is allowed.
+	// No lead suit available, so Mighty is rejected on the first trick.
 	g.Players[1].Hand = []Card{
 		{Suit: Spades, Rank: Ace}, // Mighty
 		{Suit: Clubs, Rank: Two},
 	}
 
 	err = g.ValidateMove("P2", MovePlayCard, PlayCardMove{Card: Card{Suit: Spades, Rank: Ace}})
-	if err != nil {
-		t.Fatalf("expected mighty to be allowed when player cannot follow suit: %v", err)
+	if err == nil {
+		t.Fatalf("expected mighty to be rejected on first trick when lead is a different suit: %v", err)
 	}
 }
 

@@ -64,4 +64,4 @@ Feature: Special Card Mechanics
     And "Alice" leads the "King of Hearts"
     And "Bob" has the "Ace of Spades" (Mighty) and "2 of Hearts" (Lead Suit)
     When "Bob" attempts to play the "Ace of Spades"
-    Then the move should be rejected as "cannot play mighty on first trick if you can follow suit"
+    Then the move should be rejected as "cannot play mighty on first trick unless it is your only card of the led suit"

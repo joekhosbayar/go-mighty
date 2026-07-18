@@ -44,7 +44,8 @@ func TestLateGameSpecialForcing(t *testing.T) {
 	}}
 	g.Players[0] = p
 	g.CurrentTurn = 0
-	g.Tricks = []Trick{{LeadSuit: Clubs}} // Active trick, 9th trick (since hand has 2 cards left)
+	g.Tricks = make([]Trick, 9)
+	g.Tricks[8] = Trick{LeadSuit: Clubs} // Active trick, 9th trick (since hand has 2 cards left)
 
 	// Trying to follow suit with 2 cards left and holding Mighty MUST fail.
 	err := g.ValidateMove("p1", MovePlayCard, PlayCardMove{Card: Card{Suit: Clubs, Rank: Five}})
@@ -58,4 +59,31 @@ func TestLateGameSpecialForcing(t *testing.T) {
 	// 3 cards left, holding BOTH. Must play one.
 	err = g.ValidateMove("p1", MovePlayCard, PlayCardMove{Card: Card{Suit: Clubs, Rank: Five}})
 	assert.ErrorContains(t, err, "must play mighty or joker")
+}
+
+func TestFirstTrickRestrictions(t *testing.T) {
+	g := New("test")
+	g.Trump = Hearts
+	g.Status = PhasePlaying
+	p1 := &Player{ID: "p1", Hand: []Card{{Suit: Hearts, Rank: Ace}, {Suit: Clubs, Rank: Five}}}
+	g.Players[0] = p1
+	g.CurrentTurn = 0
+	
+	// Opener leads Trick 1
+	g.Tricks = append(g.Tricks, Trick{}) 
+	
+	// Opener tries to lead Trump
+	err := g.ValidateMove("p1", MovePlayCard, PlayCardMove{Card: Card{Suit: Hearts, Rank: Ace}})
+	assert.ErrorContains(t, err, "cannot lead trump on first trick")
+
+	// Follower playing Mighty
+	g.Tricks[0].LeadSuit = Spades
+	g.Tricks[0].Cards = append(g.Tricks[0].Cards, PlayedCard{})
+	
+	p2 := &Player{ID: "p2", Hand: []Card{{Suit: Spades, Rank: Ace}, {Suit: Spades, Rank: Two}}}
+	g.Players[1] = p2
+	g.CurrentTurn = 1
+
+	err = g.ValidateMove("p2", MovePlayCard, PlayCardMove{Card: Card{Suit: Spades, Rank: Ace}})
+	assert.ErrorContains(t, err, "cannot play mighty on first trick unless it is your only card of the led suit")
 }
