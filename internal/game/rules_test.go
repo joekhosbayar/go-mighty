@@ -518,3 +518,38 @@ func TestApplyMove_AllFivePassRedeal(t *testing.T) {
 		t.Errorf("Expected passed players to be reset")
 	}
 }
+
+func TestApplyMove_FourPassThenBid(t *testing.T) {
+	g := New("test-game-four-pass-then-bid")
+	for i := range 5 {
+		p := &Player{ID: fmt.Sprintf("player%d", i+1), Seat: i, Name: fmt.Sprintf("P%d", i+1)}
+		g.Players[i] = p
+	}
+	g.Start()
+
+	// Players 1, 2, 3, 4 pass
+	for i := range 4 {
+		playerID := fmt.Sprintf("player%d", i+1)
+		err := g.ApplyMove(playerID, MovePass, nil)
+		if err != nil {
+			t.Fatalf("unexpected error on pass %d: %v", i+1, err)
+		}
+	}
+
+	// Player 5 makes a bid under 10 (e.g. 5)
+	err := g.ApplyMove("player5", MoveBid, Bid{Suit: Spades, Points: 5})
+	if err != nil {
+		t.Fatalf("unexpected error on bid: %v", err)
+	}
+
+	// The game should enter PhaseExchanging immediately
+	if g.Status != PhaseExchanging {
+		t.Errorf("Expected Exchanging phase, got %s", g.Status)
+	}
+	if g.Declarer != 4 {
+		t.Errorf("Expected Declarer to be 4 (Player 5), got %d", g.Declarer)
+	}
+	if g.CurrentBid.Points != 5 {
+		t.Errorf("Expected bid to be 5, got %d", g.CurrentBid.Points)
+	}
+}

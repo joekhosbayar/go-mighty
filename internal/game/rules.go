@@ -411,8 +411,8 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		g.CurrentBid = &bid
 		g.Declarer = p.Seat                  // Potential declarer
 
-		if bid.Points == 10 {
-			// Auto-resolve if maximum bid is reached
+		if bid.Points == 10 || len(g.PassedPlayers) == 4 {
+			// Auto-resolve if maximum bid is reached or all others passed
 			g.Status = PhaseExchanging
 			g.Contract = g.CurrentBid
 			g.Trump = g.Contract.Suit
