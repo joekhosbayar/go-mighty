@@ -180,10 +180,10 @@ func TestMightyIdentity(t *testing.T) {
 		t.Errorf("Spades Ace should be Mighty when Hearts is Trump")
 	}
 
-	// Spades Trump: Clubs Ace is Mighty
+	// Spades Trump: Diamonds Ace is Mighty
 	g.Trump = Spades
-	if !g.IsMighty(Card{Suit: Clubs, Rank: Ace}) {
-		t.Errorf("Clubs Ace should be Mighty when Spades is Trump")
+	if !g.IsMighty(Card{Suit: Diamonds, Rank: Ace}) {
+		t.Errorf("Diamonds Ace should be Mighty when Spades is Trump")
 	}
 }
 

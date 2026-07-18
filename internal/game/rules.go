@@ -339,9 +339,9 @@ func (g *Game) validatePlayCard(p *Player, payload any) error {
 // IsMighty checks if a card is the Mighty card given the current trump suit.
 func (g *Game) IsMighty(c Card) bool {
 	// Usually Ace of Spades.
-	// If Spades is Trump, Ace of Clubs is Mighty.
+	// If Spades is Trump, Ace of Diamonds is Mighty.
 	if g.Trump == Spades {
-		return c.Suit == Clubs && c.Rank == Ace
+		return c.Suit == Diamonds && c.Rank == Ace
 	}
 
 	return c.Suit == Spades && c.Rank == Ace
