@@ -32,8 +32,19 @@ A nemesis for the Joker.
 ## The Game Flow
 
 ### 1. Bidding Phase
-Players bid for the contract, specifying the number of tricks (3-10) and the trump suit (or No-Trump).
-- Minimum bid: 3.
+Players bid for the contract, specifying a **bid level** and the trump suit (or No-Trump).
+A bid is a promise of how many of the 20 scoring cards the declarer's team will capture.
+- **Bid range and mapping**: bids are entered on a **3–10** scale. This maps to the
+  official Mighty **13–20** scoring-card scale by **`target = bid + 10`**:
+
+  | Bid (our scale) | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+  |---|---|---|---|---|---|---|---|---|
+  | Scoring-card target (`bid + 10`) | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
+
+  A bid is **not** a number of tricks — there are only 10 tricks in a hand, but 20
+  scoring cards. The bid, the target, and the captured count `P` are all measured in
+  scoring cards.
+- Minimum bid: 3 (target 13).
 - No-Trump bids beat suit bids of the same level. Suit bids are ranked: Clubs < Diamonds < Hearts < Spades.
 - Bidding ends after 4 consecutive passes. The winner becomes the **Declarer**.
 
@@ -70,3 +81,33 @@ scale, mapping to a scoring-card target of `bid + 10` (13–20).
     - **No-Friend**: announced solo only (not a secret solo).
 - If the bid is the minimum (3) and the team takes exactly 13 points, `S = 0` and
   there is no payment.
+
+`P` counts the scoring cards captured by the declarer's **team** (declarer + revealed
+partner). All 20 scoring cards are always accounted for: trick points go to the trick
+winner, and the declarer's 3 kitty discards go to the declarer's own pile. A **secret
+solo** (the called card is in the declarer's own hand or the kitty, so no partner is
+ever revealed) uses the alone distribution but does **not** get the No-Friend double —
+that double is only for an openly announced solo.
+
+### Worked examples
+
+Bid values below are on our 3–10 scale; `P` is captured scoring cards.
+
+| Bid | Trump | Alone | P | Result | S (with doublings) | Declarer / Partner / each Opp |
+|---|---|---|---|---|---|---|
+| 5 | Diamonds | no | 16 | success | `2×(5−3)+(16−15)` = **5** | +10 / +5 / −5 |
+| 5 | Diamonds | no | 13 | fail | `15−13` = **2** | −4 / −2 / +2 |
+| 6 | No-Trump | no | 18 | success | `8 ×2` = **16** | +32 / +16 / −16 |
+| 6 | No-Trump | no | 13 | fail | `3 ×2` = **6** | −12 / −6 / +6 |
+| 7 | Hearts | no | 20 | run | `11 ×2` = **22** | +44 / +22 / −22 |
+| 6 | No-Trump | yes | 17 | success | `7 ×2 ×2` = **28** | +112 / — / −28 |
+| 6 | No-Trump | yes | 15 | fail | `1 ×2 ×2` = **4** | −16 / — / +4 |
+
+### Implementation note
+
+Scoring lives in `CalculateFinalScore` (`internal/game/rules.go`). It returns a
+`map[int]int` of seat → signed round score that always sums to zero, computed by one
+distribution rule: each opponent pays `S`, the partner (if any) collects `S`, and the
+declarer collects the remainder (`oppCount × S − partnerShare`), with every sign
+flipped on failure. That single rule yields both the partnered (2S / S / −S×3) and
+alone (4S / −S×4) payouts.
