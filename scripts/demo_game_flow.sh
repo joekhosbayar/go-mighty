@@ -6,7 +6,7 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-BASE_URL="http://localhost:8080"
+BASE_URL="${BASE_URL:-http://localhost:8080}"
 USERS=("alice" "bob" "carol" "dave" "eve")
 TOKENS=()
 USER_IDS=()
