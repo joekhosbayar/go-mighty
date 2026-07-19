@@ -37,14 +37,13 @@
 Run: `aws sts get-caller-identity --query Account --output text`
 Expected: a 12-digit account ID. If it errors, stop and authenticate first (`aws configure` or `aws login` / SSO).
 
-- [ ] **Step 2: Register the domain via Route 53**
+- [ ] **Step 2: Register the domain (external registrar OK)**
 
-AWS Console → Route 53 → Registered domains → Register domain (~$14/yr). Registration is not Terraform-able; it also auto-creates the hosted zone. Wait for the confirmation email (can take up to ~15 min).
+Register `<domain>` at any registrar — Porkbun is fine and cheaper than Route 53 for some TLDs. DNS will be **hosted** in Route 53 regardless (Terraform creates the hosted zone in Task 3); the registrar's only ongoing job is renewals and pointing NS records at AWS (Task 3's delegation step). If registering via Route 53 instead, its auto-created hosted zone must be imported or deleted before Task 3's apply so Terraform owns the zone.
 
-- [ ] **Step 3: Verify the hosted zone exists**
+- [ ] **Step 3: Verify the domain is registered and controllable**
 
-Run: `aws route53 list-hosted-zones --query 'HostedZones[].Name' --output text`
-Expected: `<domain>.` in the output.
+Log into the registrar and confirm the domain is active and its nameserver settings are editable. (The Route 53 hosted zone doesn't exist yet — it arrives in Task 3.)
 
 - [ ] **Step 4: Install OpenTofu**
 
@@ -232,21 +231,22 @@ git commit -m "build: cross-compile Docker image for arm64; allow demo script BA
 
 ---
 
-### Task 3: Terraform scaffold + ECR + deploy bucket + config parameters
+### Task 3: Terraform scaffold + ECR + deploy bucket + hosted zone + config parameters
 
 **Files:**
 - Create: `deploy/terraform/versions.tf`
 - Create: `deploy/terraform/variables.tf`
 - Create: `deploy/terraform/ecr.tf`
 - Create: `deploy/terraform/s3.tf`
+- Create: `deploy/terraform/dns.tf`
 - Create: `deploy/terraform/ssm.tf`
 - Create: `deploy/terraform/outputs.tf`
 - Create: `deploy/terraform/terraform.tfvars.example`
 - Modify: `.gitignore` (append terraform entries; create the file if absent)
 
 **Interfaces:**
-- Consumes: state bucket + hosted zone from Task 0.
-- Produces: tofu workspace that later tasks add files into; resources `aws_ecr_repository.mighty`, `aws_s3_bucket.deploy`; SSM params `/mighty/api_domain`, `/mighty/acme_email`; outputs `ecr_repo_url`, `deploy_bucket`. Variable names `domain`, `alert_email`, `region`, `instance_type` are referenced by every later `.tf` file.
+- Consumes: state bucket + externally registered domain from Task 0.
+- Produces: tofu workspace that later tasks add files into; resources `aws_ecr_repository.mighty`, `aws_s3_bucket.deploy`, `aws_route53_zone.main` (NS records delegated at the registrar in this task — propagation must complete before Task 6's ACME issuance); SSM params `/mighty/api_domain`, `/mighty/acme_email`; outputs `ecr_repo_url`, `deploy_bucket`, `name_servers`. Variable names `domain`, `alert_email`, `region`, `instance_type` are referenced by every later `.tf` file.
 
 - [ ] **Step 1: Write the scaffold files**
 
@@ -355,6 +355,14 @@ resource "aws_s3_bucket_public_access_block" "deploy" {
 }
 ```
 
+Create `deploy/terraform/dns.tf` (zone only for now — the A record arrives in Task 4, the health check in Task 7; the domain is registered externally, so Terraform owns the zone and the registrar delegates to it):
+
+```hcl
+resource "aws_route53_zone" "main" {
+  name = var.domain
+}
+```
+
 Create `deploy/terraform/ssm.tf` (non-secret config the instance reads at deploy; secrets are created by CLI in Task 6, never here):
 
 ```hcl
@@ -380,6 +388,10 @@ output "ecr_repo_url" {
 
 output "deploy_bucket" {
   value = aws_s3_bucket.deploy.bucket
+}
+
+output "name_servers" {
+  value = aws_route53_zone.main.name_servers
 }
 ```
 
@@ -415,9 +427,18 @@ tofu -chdir=deploy/terraform init
 tofu -chdir=deploy/terraform apply
 ```
 
-Expected: init prints "OpenTofu has been successfully initialized"; apply plan shows only additions (ECR repo + lifecycle policy, S3 bucket + public-access block, 2 SSM params), 0 to change/destroy. Type `yes`. Apply completes; outputs show `ecr_repo_url` and `deploy_bucket`.
+Expected: init prints "OpenTofu has been successfully initialized"; apply plan shows only additions (ECR repo + lifecycle policy, S3 bucket + public-access block, Route 53 zone, 2 SSM params), 0 to change/destroy. Type `yes`. Apply completes; outputs show `ecr_repo_url`, `deploy_bucket`, and `name_servers`.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Delegate the domain to Route 53 at the registrar (manual)**
+
+Run: `tofu -chdir=deploy/terraform output name_servers` — then in the registrar's dashboard (e.g. Porkbun → domain → Authoritative Nameservers), replace the default nameservers with the four AWS ones. Delegation must be live before Task 6 (Let's Encrypt can't validate until the domain resolves via Route 53).
+
+- [ ] **Step 5: Verify delegation**
+
+Run: `dig +short NS <domain>` (repeat until propagated — typically minutes, up to a few hours)
+Expected: the four `awsdns` nameservers from the output above.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add deploy/terraform .gitignore
@@ -433,7 +454,7 @@ git commit -m "infra: terraform scaffold with ECR, deploy bucket, config params"
 - Create: `deploy/terraform/iam.tf`
 - Create: `deploy/terraform/ec2.tf`
 - Create: `deploy/terraform/user-data.sh`
-- Create: `deploy/terraform/dns.tf`
+- Modify: `deploy/terraform/dns.tf` (append the A record; zone resource exists from Task 3)
 - Modify: `deploy/terraform/outputs.tf` (append)
 
 **Interfaces:**
@@ -613,15 +634,11 @@ resource "aws_eip" "api" {
 }
 ```
 
-- [ ] **Step 5: Write dns.tf**
+- [ ] **Step 5: Append the A record to dns.tf** (zone resource exists from Task 3)
 
 ```hcl
-data "aws_route53_zone" "main" {
-  name = var.domain
-}
-
 resource "aws_route53_record" "api" {
-  zone_id = data.aws_route53_zone.main.zone_id
+  zone_id = aws_route53_zone.main.zone_id
   name    = local.api_domain
   type    = "A"
   ttl     = 300
