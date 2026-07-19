@@ -81,6 +81,7 @@ func main() {
 	mux.HandleFunc("POST /games/{id}/move", handler.MoveHandler)
 	mux.HandleFunc("GET /games/{id}", handler.GetGameHandler)
 	mux.HandleFunc("GET /games/{id}/ws", handler.WSHandler) // WebSocket
+	mux.HandleFunc("GET /healthz", api.HealthzHandler)
 
 	// 6. Server
 	port := os.Getenv("PORT")
