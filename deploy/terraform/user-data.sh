@@ -21,6 +21,7 @@ echo '/swapfile none swap sw 0 0' >> /etc/fstab
 # Unattended security updates (spec Section 3, Layer 3)
 dnf install -y dnf-automatic
 sed -i 's/^apply_updates = .*/apply_updates = yes/' /etc/dnf/automatic.conf
+sed -i 's/^upgrade_type = .*/upgrade_type = security/' /etc/dnf/automatic.conf
 systemctl enable --now dnf-automatic.timer
 
 # Deploy target directory

@@ -5,7 +5,7 @@ data "aws_ssm_parameter" "al2023_arm64" {
 resource "aws_instance" "api" {
   ami                    = data.aws_ssm_parameter.al2023_arm64.value
   instance_type          = var.instance_type
-  subnet_id              = data.aws_subnets.default.ids[0]
+  subnet_id              = sort(data.aws_subnets.default.ids)[0]
   vpc_security_group_ids = [aws_security_group.api.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2.name
   user_data              = file("${path.module}/user-data.sh")
@@ -27,7 +27,7 @@ resource "aws_instance" "api" {
   tags = { Name = "mighty-api" }
 
   lifecycle {
-    ignore_changes = [ami] # AMI param moves daily; don't replace the box on apply
+    ignore_changes = [ami, subnet_id] # AMI param moves daily; subnet ordering isn't guaranteed stable — don't replace the box on apply
   }
 }
 
