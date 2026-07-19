@@ -53,11 +53,20 @@ The Declarer calls out a specific card (e.g., "Ace of Hearts").
 - **Rule**: The Mighty cannot be played on the first trick unless the player cannot follow the lead suit.
 - Players must follow the lead suit if possible.
 
-## Scoring (UCLA Campus Standard)
-- **Base Score**: `(Contract * 10) + (OverTricks * 5)`.
-- **Team Split**: The Declarer wins the full score, the Partner wins half.
-- **Multipliers**:
-    - **No-Trump**: 2x
-    - **No-Friend**: 2x
-    - **10-Bid**: 2x
-- **Cap**: Maximum score or loss is capped at **800 points**.
+## Scoring (Official Mighty)
+
+Scores are zero-sum: they add up to zero across all five players. `P` is the number
+of the 20 scoring cards the declarer's team captured. Bids are entered on a 3–10
+scale, mapping to a scoring-card target of `bid + 10` (13–20).
+
+- **Success** (`P ≥ bid + 10`): `S = 2×(bid − 3) + (P − (bid + 10))`.
+- **Failure** (`P < bid + 10`): `S = (bid + 10) − P`.
+- **Distribution** — success: declarer **+2S**, partner **+S**, each opponent **−S**;
+  failure reverses every sign. Playing alone: declarer **±4S**, each opponent **∓S**.
+- **Multipliers** (each ×2, stacking):
+    - **Run**: team captured all 20 scoring cards.
+    - **Back-run**: opponents captured ≥ 11 scoring cards.
+    - **No-Trump**.
+    - **No-Friend**: announced solo only (not a secret solo).
+- If the bid is the minimum (3) and the team takes exactly 13 points, `S = 0` and
+  there is no payment.
