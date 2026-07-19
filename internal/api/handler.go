@@ -320,10 +320,16 @@ func ConvertPayload(moveType game.MoveType, payload any) (any, error) {
 		}
 
 		return nil, errors.New("invalid play card payload: expected card or play_card_move object")
-	case game.MovePass:
-		return nil, nil // No payload needed for pass usually, or ignored
+	case game.MoveChangeConfig:
+		var cm game.ChangeConfigMove
+		if err := json.Unmarshal(data, &cm); err != nil {
+			return nil, err
+		}
+		return cm, nil
+	case game.MovePass, game.MovePlayAgain:
+		return nil, nil // No payload needed for pass or play_again
 	default:
-		return nil, nil
+		return payload, nil
 	}
 }
 
