@@ -25,3 +25,9 @@ go.work
 .DS_Store
 .idea/*
 .gitignore
+
+# Terraform
+deploy/terraform/.terraform/
+deploy/terraform/terraform.tfvars
+*.tfstate
+*.tfstate.*
