@@ -2,6 +2,7 @@
 package game
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -61,6 +62,11 @@ func (g *Game) ValidateMove(playerID string, moveType MoveType, payload any) err
 		return g.validateCallPartner(p, payload)
 	case MovePlayCard:
 		return g.validatePlayCard(p, payload)
+	case MovePlayAgain, MoveChangeConfig:
+		if g.Status != PhaseFinished {
+			return fmt.Errorf("%w: not in finished phase", ErrInvalidMove)
+		}
+		return nil
 	default:
 		return errors.New("unknown move type")
 	}
@@ -505,6 +511,46 @@ func (p *Player) GetSuitCount(s Suit) int {
 func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error {
 	p := g.GetPlayer(playerID)
 
+	if g.Status == PhaseFinished {
+		if moveType == MoveChangeConfig {
+			if payload != nil {
+				var cm ChangeConfigMove
+				// Handle both ChangeConfigMove from tests and unmarshaled json
+				if typedCM, ok := payload.(ChangeConfigMove); ok {
+					cm = typedCM
+				} else {
+					data, _ := json.Marshal(payload)
+					_ = json.Unmarshal(data, &cm)
+				}
+				
+				if cm.NumPlayers == 4 || cm.NumPlayers == 5 {
+					g.Config.NumPlayers = cm.NumPlayers
+					g.PlayAgainVotes = make(map[int]bool) // Reset votes on config change
+				}
+			}
+			g.Version++
+			g.UpdatedAt = time.Now()
+			return nil
+		}
+
+		if moveType == MovePlayAgain {
+			if g.PlayAgainVotes == nil {
+				g.PlayAgainVotes = make(map[int]bool)
+			}
+			g.PlayAgainVotes[p.Seat] = true
+			
+			// Check if all active seats voted
+			if len(g.PlayAgainVotes) == g.Config.NumPlayers {
+				g.resetForNextRound()
+			}
+			g.Version++
+			g.UpdatedAt = time.Now()
+			return nil
+		}
+		
+		return errors.New("invalid move in finished phase")
+	}
+
 	switch moveType {
 	case MoveBid:
 		bid, ok := payload.(Bid)
@@ -694,6 +740,12 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 					if player != nil {
 						g.Scores[player.ID] = seatScores[seat]
 					}
+				}
+				if g.TotalScores == nil {
+					g.TotalScores = make(map[string]int)
+				}
+				for pID, score := range g.Scores {
+					g.TotalScores[pID] += score
 				}
 			} else {
 				g.Tricks = append(g.Tricks, Trick{Cards: []PlayedCard{}})
@@ -942,4 +994,34 @@ func (g *Game) advanceToNextBidder() {
 			break
 		}
 	}
+}
+
+// resetForNextRound clears the board state and starts a new set of tricks.
+func (g *Game) resetForNextRound() {
+	g.PlayAgainVotes = make(map[int]bool)
+	g.Tricks = make([]Trick, 0)
+	g.Bids = nil
+	g.CurrentBid = nil
+	g.Contract = nil
+	g.Declarer = -1
+	g.PartnerCard = nil
+	g.PartnerSeat = -1
+	g.PassedPlayers = make(map[int]bool)
+	g.Scores = make(map[string]int)
+	g.IsNoFriend = false
+	
+	// Shift dealer clockwise, handling current config bounds
+	g.Dealer = (g.Dealer + 1) % g.Config.NumPlayers
+	
+	// Clear point cards from previous round
+	for i := range g.Players {
+		if g.Players[i] != nil {
+			g.Players[i].Points = []Card{}
+		}
+	}
+	
+	// Start re-deals cards and sets PhaseBidding
+	g.Start()
+	// Bidding starts with the new dealer
+	g.CurrentTurn = g.Dealer
 }

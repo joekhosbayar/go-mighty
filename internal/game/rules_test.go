@@ -585,3 +585,38 @@ func TestApplyMove_FourPassThenBid(t *testing.T) {
 		t.Errorf("Expected bid to be 5, got %d", g.CurrentBid.Points)
 	}
 }
+
+func TestMultiSetMatch(t *testing.T) {
+	g := NewWithConfig("test", GameConfig{NumPlayers: 5})
+	for i := 0; i < 5; i++ {
+		g.Players[i] = &Player{ID: "p" + string(rune(i+48)), Seat: i}
+	}
+	g.Status = PhaseFinished
+	g.Scores = map[string]int{"p0": 10, "p1": -5}
+	g.TotalScores = map[string]int{"p0": 10, "p1": -5}
+	g.Dealer = 0
+
+	// Vote to play again
+	for i := 0; i < 4; i++ {
+		_ = g.ApplyMove("p"+string(rune(i+48)), MovePlayAgain, nil)
+	}
+	if g.Status != PhaseFinished {
+		t.Errorf("expected game to stay in finished phase until all vote")
+	}
+	
+	// 5th vote
+	_ = g.ApplyMove("p4", MovePlayAgain, nil)
+	
+	if g.Status != PhaseBidding {
+		t.Errorf("expected game to reset and enter bidding phase")
+	}
+	if g.Dealer != 1 {
+		t.Errorf("expected dealer to shift to 1, got %d", g.Dealer)
+	}
+	if g.CurrentTurn != 1 {
+		t.Errorf("expected bidding to start with dealer 1, got %d", g.CurrentTurn)
+	}
+	if len(g.TotalScores) == 0 {
+		t.Errorf("TotalScores should persist")
+	}
+}
