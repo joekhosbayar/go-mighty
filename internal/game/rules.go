@@ -747,6 +747,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 				for pID, score := range g.Scores {
 					g.TotalScores[pID] += score
 				}
+				g.ScoreHistory = append(g.ScoreHistory, g.Scores)
 			} else {
 				g.Tricks = append(g.Tricks, Trick{Cards: []PlayedCard{}})
 			}

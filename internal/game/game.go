@@ -116,9 +116,10 @@ type Game struct {
 	Tricks []Trick `json:"tricks"`
 
 	// Scoring
-	Scores         map[string]int `json:"scores"` // Final round scores: declarer full, revealed partner half, others 0. Card points live in Player.Points.
-	TotalScores    map[string]int `json:"total_scores"` // Cumulative scores
-	PlayAgainVotes map[int]bool   `json:"play_again_votes"` // Seats that voted to play again
+	Scores         map[string]int   `json:"scores"` // Final round scores: declarer full, revealed partner half, others 0. Card points live in Player.Points.
+	TotalScores    map[string]int   `json:"total_scores"` // Cumulative scores
+	ScoreHistory   []map[string]int `json:"score_history"` // History of round scores
+	PlayAgainVotes map[int]bool     `json:"play_again_votes"` // Seats that voted to play again
 
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
