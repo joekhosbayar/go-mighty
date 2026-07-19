@@ -159,24 +159,22 @@ func NewWithConfig(id string, cfg GameConfig) *Game {
 	return g
 }
 
-// IsFull checks if the game has 5 players.
+// IsFull checks if the game has all its seats filled.
 func (g *Game) IsFull() bool {
 	count := 0
-
-	for _, p := range g.Players {
-		if p != nil {
+	for i := 0; i < g.numSeats(); i++ {
+		if g.Players[i] != nil {
 			count++
 		}
 	}
-
-	return count == 5
+	return count == g.numSeats()
 }
 
 // Start deals the cards and starts the bidding phase.
 func (g *Game) Start() {
-	deck := NewDeck()
+	deck := NewDeckFor(g.numSeats())
 	deck.Shuffle()
-	hands, kitty := deck.Deal()
+	hands, kitty := deck.Deal(g.numSeats())
 
 	for i, h := range hands {
 		if g.Players[i] != nil {
@@ -188,9 +186,5 @@ func (g *Game) Start() {
 	g.Kitty = kitty
 	g.Status = PhaseBidding
 
-	// Determine first bidder
-	// Usually dealer's left (or previous declarer).
-	// We'll simplistic: Seat 0 starts.
-	// Or Random dealer?
 	g.CurrentTurn = 0 // Seat 0 bids first
 }
