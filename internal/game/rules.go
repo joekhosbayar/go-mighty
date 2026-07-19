@@ -816,7 +816,7 @@ func (g *Game) CalculateFinalScore() map[int]int {
 
 	var s int
 	if success {
-		s = 2*(g.Contract.Points-3) + (p - target)
+		s = 2*(g.Contract.Points-g.minBidPoints()) + (p - target)
 	} else {
 		s = target - p
 	}
@@ -844,8 +844,40 @@ func (g *Game) CalculateFinalScore() map[int]int {
 		partnerShare = s
 	}
 
-	// Distribution (sums to zero): each opponent pays S, the partner collects S,
-	// the declarer collects the remainder. Every sign flips on failure.
+	// A configured four-player 2-vs-2 failure uses a special split; every other
+	// case (all wins, all alone games, and every five-player result) uses the
+	// standard formula where each opponent pays S, the partner collects S, and
+	// the declarer collects the remainder, with signs flipped on failure.
+	special := !success && partnerPresent && g.Config.NumPlayers == 4 &&
+		(g.Config.FailDist == FailDeclarerAlone || g.Config.FailDist == FailTwoOneSplit)
+
+	if special {
+		var declarerPay, partnerPay, oppGain int
+		switch g.Config.FailDist {
+		case FailDeclarerAlone:
+			declarerPay, partnerPay, oppGain = 2*s, 0, s
+		default: // FailTwoOneSplit
+			oppGain = (3*s + 1) / 2 // ceil(1.5*s)
+			partnerPay = s
+			declarerPay = 2*oppGain - partnerPay // 2s if s even, 2s+1 if s odd
+		}
+		for seat, player := range g.Players {
+			if player == nil {
+				continue
+			}
+			switch {
+			case seat == declarer:
+				scores[seat] = -declarerPay
+			case seat == fs:
+				scores[seat] = -partnerPay
+			default:
+				scores[seat] = oppGain
+			}
+		}
+		return scores
+	}
+
+	// Standard distribution (sums to zero).
 	for seat, player := range g.Players {
 		if player == nil {
 			continue
