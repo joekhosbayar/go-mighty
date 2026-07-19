@@ -16,7 +16,7 @@
 | Decision | Choice | Why |
 |---|---|---|
 | Budget posture | Near-zero (~$5–15/mo target) | User choice; buys one honest always-on box |
-| Region | us-west-2 (Oregon) | Full service availability (incl. Cognito Essentials), cheapest us-west pricing, ~20–30ms from LA player base |
+| Region | us-east-1 (N. Virginia) | User choice. Full service availability, cheapest AWS region. Trade-off: ~60–70ms RTT from LA vs ~20–30ms for us-west-2 — acceptable for a turn-based card game |
 | Auth | Cognito User Pool (Essentials tier) | Passkeys/MFA/reset managed; free ≤10k MAU; backend swaps JWT issuing for JWKS verification |
 | Domain | Buy via Route 53 (~$14/yr) | Passkeys (WebAuthn) require HTTPS on a real domain |
 | Frontend hosting | Amplify Hosting | Free-tier CI/CD + CDN + TLS for the Vite app, plus built-in SPA URL-rewrite rule (serves `index.html` for client-routed paths so deep links/refreshes don't 404); no app code changes |
