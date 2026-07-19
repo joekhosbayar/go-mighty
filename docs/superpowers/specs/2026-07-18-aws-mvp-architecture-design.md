@@ -106,7 +106,8 @@ See the single authoritative cost summary at the end of Section 4 (~$19/mo total
 
 Defense in layers:
 
-- **Layer 0 — Cognito (auth abuse):** login/signup/reset/OTP throttling and lockout are managed by Cognito; credential-stuffing never reaches our infrastructure.
+- **Layer 0 — AWS Shield Standard (L3/L4 DDoS):** automatic and free on all EC2. Volumetric network-layer attacks (SYN floods, UDP reflection) are scrubbed at AWS's edge before reaching the instance. No setup required — named here so the protection is explicit rather than assumed absent.
+- **Layer 0.5 — Cognito (auth abuse):** login/signup/reset/OTP throttling and lockout are managed by Cognito; credential-stuffing never reaches our infrastructure.
 - **Layer 1 — Caddy edge (per-IP, HTTP):** Caddy built with the rate-limit plugin via `xcaddy` (small custom Dockerfile).
   - General API zone ~100 req/min/IP → 429; strict zone ~10 req/min/IP on expensive endpoints (game creation, matchmaking).
   - Hygiene: body size cap (64KB), header/idle timeouts, HTTP→HTTPS redirect, security headers (HSTS, nosniff, frame-deny), CORS locked to `https://app.<domain>`.
@@ -116,6 +117,20 @@ Defense in layers:
   - Concurrent sockets: max ~3/user, ~20/IP.
   - Keep the 5-second AUTH deadline; add max WS frame size and ping/pong idle timeout if absent.
 - **Layer 3 — instance hardening:** SG inbound 443/80 only; no SSH (SSM Session Manager via IAM instance role); Postgres/Redis on compose network only (no host ports); secrets from SSM Parameter Store into `.env` at deploy (nothing in repo/user-data); `dnf-automatic` security updates (AL2023).
+
+### DDoS posture (accepted risk, $0)
+
+**What the layers above do and don't cover.** Caddy's per-IP rate limiting is *abuse control* — it handles scrapers, buggy client loops, and single hostile IPs. It is **not** DDoS protection: a distributed attack from thousands of IPs stays under every per-IP limit, and even blocked requests still cost the box a TCP accept, a TLS handshake, and request parsing before the 429. Shield Standard (Layer 0) covers L3/L4; application-layer (L7) floods terminate on the instance.
+
+**Accepted risk:** a determined L7 flood means temporary downtime for the duration of the attack. This is a deliberate MVP trade-off for a pre-launch game with no adversaries.
+
+**Why this is an availability problem, not a billing problem.** EC2 is flat-rate (no per-request billing, unlike Lambda/API Gateway), inbound traffic is free, and outbound error responses are a few hundred bytes — even a sustained flood generates single-digit dollars of egress. The largest *uncapped* cost surface is actually **Amplify Hosting** (~$0.15/GB served after free tier): an attacker repeatedly pulling SPA bundles through the CDN. The AWS Budgets alert (Section 4) is the tripwire for this and any other billing surprise.
+
+**Escalation runbook (documented now, built only if attacked):**
+
+1. Put **Cloudflare free tier** in front of `api.<domain>`: L7 DDoS filtering, origin IP hidden, WebSockets supported, $0/mo.
+2. Lock the security group inbound to Cloudflare's published IP ranges.
+3. **Rotate the Elastic IP** at the same time — the current IP will be in public DNS history (IP-history services record it), so an edge layer without origin rotation can be bypassed by hitting the old address directly.
 
 **Deferred with adoption triggers:** WAF (when ALB exists / real L7 attacks), CloudFront on the API (DDoS absorption at scale), Shield Advanced (never at this scale; Shield Standard is automatic/free).
 
@@ -142,12 +157,13 @@ One **OTel Collector (contrib)** container in the compose stack is the single te
 
 Dashboards and app-level alerts (error rate, latency, socket/game anomalies) live in **Grafana Cloud alerting** → email.
 
-**Dead-box detection stays outside the OTel pipeline** (a box that dies can't export the telemetry saying so). Two independent CloudWatch alarms → SNS → email:
+**Dead-box detection stays outside the OTel pipeline** (a box that dies can't export the telemetry saying so). Three independent AWS-side alerts → email:
 
 | Alarm | Condition |
 |---|---|
 | Instance dead | EC2 `StatusCheckFailed` |
 | API down (external probe) | Route 53 health check on `https://api.<domain>` fails (~$0.75/mo — the only paid observability item) |
+| Cost anomaly | AWS Budgets: alert at $25 forecast / $30 actual → email (free; catches Amplify egress abuse, snapshot creep, any billing surprise) |
 
 ### CI/CD
 
