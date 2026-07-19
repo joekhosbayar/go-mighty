@@ -35,7 +35,16 @@ const (
 	MoveCallPartner MoveType = "call_partner"
 	// MovePlayCard represents a card play action during the playing phase.
 	MovePlayCard MoveType = "play_card"
+	// MovePlayAgain represents voting to play another round.
+	MovePlayAgain MoveType = "play_again"
+	// MoveChangeConfig represents changing the game config (e.g. NumPlayers).
+	MoveChangeConfig MoveType = "change_config"
 )
+
+// ChangeConfigMove represents the payload for changing game config.
+type ChangeConfigMove struct {
+	NumPlayers int `json:"num_players"`
+}
 
 // PlayCardMove represents the payload for playing a card.
 type PlayCardMove struct {
@@ -107,7 +116,9 @@ type Game struct {
 	Tricks []Trick `json:"tricks"`
 
 	// Scoring
-	Scores map[string]int `json:"scores"` // Final round scores: declarer full, revealed partner half, others 0. Card points live in Player.Points.
+	Scores         map[string]int `json:"scores"` // Final round scores: declarer full, revealed partner half, others 0. Card points live in Player.Points.
+	TotalScores    map[string]int `json:"total_scores"` // Cumulative scores
+	PlayAgainVotes map[int]bool   `json:"play_again_votes"` // Seats that voted to play again
 
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
@@ -150,6 +161,8 @@ func NewWithConfig(id string, cfg GameConfig) *Game {
 		PassedPlayers: make(map[int]bool),
 		Tricks:        make([]Trick, 0),
 		Scores:        make(map[string]int),
+		TotalScores:   make(map[string]int),
+		PlayAgainVotes: make(map[int]bool),
 		Declarer:      -1,
 		PartnerSeat:   -1,
 		Version:       1,
