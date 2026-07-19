@@ -562,6 +562,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 
 		g.CurrentBid = &bid
 		g.Declarer = p.Seat                  // Potential declarer
+		g.Bids = append(g.Bids, bid)
 
 		if bid.Points == 10 || len(g.PassedPlayers) == g.numSeats()-1 {
 			// Auto-resolve if maximum bid is reached or all others passed
@@ -579,6 +580,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 
 	case MovePass:
 		g.PassedPlayers[p.Seat] = true
+		g.Bids = append(g.Bids, Bid{PlayerID: playerID, Points: 0})
 		g.advanceToNextBidder()
 		// Check if bidding ended
 		if len(g.PassedPlayers) == g.numSeats()-1 && g.CurrentBid != nil {
