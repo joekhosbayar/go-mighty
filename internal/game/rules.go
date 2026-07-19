@@ -111,8 +111,8 @@ func (g *Game) validateBid(p *Player, payload any) error {
 		return fmt.Errorf("%w: not your turn to bid", ErrInvalidMove)
 	}
 
-	if bid.Points < 3 || bid.Points > 10 {
-		return fmt.Errorf("%w: bid points must be between 3 and 10", ErrInvalidMove)
+	if bid.Points < g.minBidPoints() || bid.Points > 10 {
+		return fmt.Errorf("%w: bid points must be between %d and 10", ErrInvalidMove, g.minBidPoints())
 	}
 
 	if bid.IsNoTrump {
@@ -513,7 +513,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		g.CurrentBid = &bid
 		g.Declarer = p.Seat                  // Potential declarer
 
-		if bid.Points == 10 || len(g.PassedPlayers) == 4 {
+		if bid.Points == 10 || len(g.PassedPlayers) == g.numSeats()-1 {
 			// Auto-resolve if maximum bid is reached or all others passed
 			g.Status = PhaseExchanging
 			g.Contract = g.CurrentBid
@@ -531,7 +531,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		g.PassedPlayers[p.Seat] = true
 		g.advanceToNextBidder()
 		// Check if bidding ended
-		if len(g.PassedPlayers) == 4 && g.CurrentBid != nil {
+		if len(g.PassedPlayers) == g.numSeats()-1 && g.CurrentBid != nil {
 			g.Status = PhaseExchanging
 			// Set final declarer (should be already set by last bid)
 			g.Contract = g.CurrentBid
@@ -542,7 +542,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			declarer := g.Players[g.Declarer]
 			declarer.Hand = append(declarer.Hand, g.Kitty...)
 			g.Kitty = nil // Empty kitty
-		} else if len(g.PassedPlayers) == 5 {
+		} else if len(g.PassedPlayers) == g.numSeats() {
 			// Everyone passed: throw the hand in and redeal.
 			g.Bids = nil
 			g.CurrentBid = nil
@@ -657,10 +657,10 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		}
 
 		// Turn moves to next
-		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		g.CurrentTurn = (g.CurrentTurn + 1) % g.numSeats()
 
 		// Check if trick finished
-		if len(g.Tricks[idx].Cards) == 5 {
+		if len(g.Tricks[idx].Cards) == g.numSeats() {
 			winnerSeat, points := g.ResolveTrick(g.Tricks[idx])
 			g.Tricks[idx].Winner = winnerSeat
 
@@ -897,11 +897,11 @@ func RankValue(r Rank) int {
 
 // advanceToNextBidder advances the current turn to the next player who has not passed.
 func (g *Game) advanceToNextBidder() {
-	if len(g.PassedPlayers) >= 5 {
+	if len(g.PassedPlayers) >= g.numSeats() {
 		return
 	}
 	for {
-		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		g.CurrentTurn = (g.CurrentTurn + 1) % g.numSeats()
 		if !g.PassedPlayers[g.CurrentTurn] {
 			break
 		}
