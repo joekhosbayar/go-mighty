@@ -781,10 +781,12 @@ func TestFourPlayerScore(t *testing.T) {
 		{"fail two-one even 13pts", 5, FailTwoOneSplit, false, 13, -4, -2, 3},
 		// fail two_one odd: s = 15-12 = 3; opp +5, partner -3, declarer -7
 		{"fail two-one odd 12pts", 5, FailTwoOneSplit, false, 12, -7, -3, 5},
-		// alone success: s=3; declarer +9 vs three opponents -3
-		{"alone success 16pts", 5, FailEqualSplit, true, 16, 9, 0, -3},
-		// alone fail: s=2; declarer -6, opp +2 (fd ignored when alone)
-		{"alone fail 13pts", 5, FailTwoOneSplit, true, 13, -6, 0, 2},
+		// alone success: s = 2*(5-4)+(16-15)=3, doubled by the no-friend ×2 = 6;
+		// declarer +18 vs three opponents -6
+		{"alone success 16pts", 5, FailEqualSplit, true, 16, 18, 0, -6},
+		// alone fail: s = 15-13 = 2, doubled by no-friend ×2 = 4; declarer -12,
+		// opp +4 (fd ignored when alone)
+		{"alone fail 13pts", 5, FailTwoOneSplit, true, 13, -12, 0, 4},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
