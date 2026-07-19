@@ -527,13 +527,28 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 			}
 		}
 
+		// Official rules are zero-sum: the five seat scores must sum to zero.
+		sum := 0
 		for _, p := range api.game.Players {
-			if p == nil || p.Seat == api.game.Declarer || p.Seat == friend {
+			if p == nil {
 				continue
 			}
+			sum += api.game.Scores[p.ID]
+		}
+		if sum != 0 {
+			return fmt.Errorf("round scores must sum to zero, got %d", sum)
+		}
 
-			if s := api.game.Scores[p.ID]; s != 0 {
-				return fmt.Errorf("non-team player %d has score %d, want 0", p.Seat, s)
+		// With a revealed partner, each opponent loses exactly the partner's share.
+		if friend >= 0 && friend != api.game.Declarer {
+			partnerScore := api.game.Scores[api.game.Players[friend].ID]
+			for _, p := range api.game.Players {
+				if p == nil || p.Seat == api.game.Declarer || p.Seat == friend {
+					continue
+				}
+				if s := api.game.Scores[p.ID]; s != -partnerScore {
+					return fmt.Errorf("opponent %d score %d, want %d", p.Seat, s, -partnerScore)
+				}
 			}
 		}
 

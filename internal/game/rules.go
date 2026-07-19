@@ -682,22 +682,14 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 
 			if len(g.Tricks) == 10 {
 				g.Status = PhaseFinished
-				declarerScore, partnerScore := g.CalculateFinalScore()
+				seatScores := g.CalculateFinalScore()
 
+				// Zero-sum per-seat result for the round, keyed by player ID.
 				g.Scores = make(map[string]int, len(g.Players))
-				for _, player := range g.Players {
+				for seat, player := range g.Players {
 					if player != nil {
-						g.Scores[player.ID] = 0
+						g.Scores[player.ID] = seatScores[seat]
 					}
-				}
-				// This score model stores the declarer/friend team result for the round.
-				// Opponents are explicitly kept at 0 in this per-round map.
-				if g.Declarer >= 0 && g.Declarer < len(g.Players) && g.Players[g.Declarer] != nil {
-					g.Scores[g.Players[g.Declarer].ID] = int(declarerScore)
-				}
-
-				if fs := g.friendSeat(); fs >= 0 && fs < len(g.Players) && g.Players[fs] != nil {
-					g.Scores[g.Players[fs].ID] = int(partnerScore)
 				}
 			} else {
 				g.Tricks = append(g.Tricks, Trick{Cards: []PlayedCard{}})
@@ -783,70 +775,88 @@ func (g *Game) Beats(c1, c2 Card, t Trick) bool {
 	return g.CalculatePower(c1, t, trickNum) > g.CalculatePower(c2, t, trickNum)
 }
 
-// CalculateFinalScore calculates the final points for the declarer and friend.
-func (g *Game) CalculateFinalScore() (float64, float64) {
+// CalculateFinalScore computes each seat's signed round score under the
+// official Mighty regulations. The returned map is keyed by seat index and
+// always sums to zero. Bids are on the 3-10 scale; the scoring-card target is
+// bid + 10. P is the caller team's captured scoring cards.
+func (g *Game) CalculateFinalScore() map[int]int {
+	scores := make(map[int]int)
 	if g.Contract == nil {
-		return 0, 0
+		return scores
 	}
 
+	declarer := g.Declarer
 	fs := g.friendSeat()
+	partnerPresent := fs >= 0 && fs != declarer
+	onTeam := func(seat int) bool {
+		return seat == declarer || (partnerPresent && seat == fs)
+	}
 
-	// Count tricks won by the caller team (declarer + friend).
-	tricksWon := 0
-
-	for _, t := range g.Tricks {
-		if t.Winner == g.Declarer || t.Winner == fs {
-			tricksWon++
+	// P: the team's captured scoring cards. All 20 point cards are always
+	// distributed - trick points go to winners, kitty discards to the declarer.
+	p := 0
+	oppCount := 0
+	for seat, player := range g.Players {
+		if player == nil {
+			continue
+		}
+		if onTeam(seat) {
+			p += len(player.Points)
+		} else {
+			oppCount++
 		}
 	}
 
-	// User's example says "7-spade bid... win 7 out of 10 tricks".
-	contractGoal := g.Contract.Points
+	target := g.Contract.Points + 10
+	success := p >= target
 
-	score := 0.0
-	diff := tricksWon - contractGoal
-
-	if diff >= 0 {
-		// Won!
-		score = float64(contractGoal*10 + diff*5)
+	var s int
+	if success {
+		s = 2*(g.Contract.Points-3) + (p - target)
 	} else {
-		// Lost!
-		// "loses on a 7-hearts bid by capturing only 6 tricks. That would be -7*10 = -70"
-		// "Had they only captured 5 tricks, that would be -7*10 – 1*5 = -75"
-		score = float64(-contractGoal * 10)
-		if diff < -1 {
-			score += float64((diff + 1) * 5)
+		s = target - p
+	}
+
+	// Doublings, each multiplicative.
+	if p == 20 { // run
+		s *= 2
+	}
+	if 20-p >= 11 { // back run: defenders took >= 11 scoring cards
+		s *= 2
+	}
+	if g.Contract.IsNoTrump {
+		s *= 2
+	}
+	if g.IsNoFriend {
+		s *= 2
+	}
+
+	sign := 1
+	if !success {
+		sign = -1
+	}
+	partnerShare := 0
+	if partnerPresent {
+		partnerShare = s
+	}
+
+	// Distribution (sums to zero): each opponent pays S, the partner collects S,
+	// the declarer collects the remainder. Every sign flips on failure.
+	for seat, player := range g.Players {
+		if player == nil {
+			continue
+		}
+		switch {
+		case seat == declarer:
+			scores[seat] = sign * (oppCount*s - partnerShare)
+		case partnerPresent && seat == fs:
+			scores[seat] = sign * s
+		default:
+			scores[seat] = -sign * s
 		}
 	}
 
-	// Multipliers
-	if g.Contract.IsNoTrump {
-		score *= 2
-	}
-
-	if g.IsNoFriend {
-		score *= 2
-	}
-
-	if contractGoal == 10 {
-		score *= 2
-	}
-
-	// Cap at 800/-800 as per user rule
-	if score > 800 {
-		score = 800
-	}
-
-	if score < -800 {
-		score = -800
-	}
-
-	friendScore := score / 2.0
-	if g.IsNoFriend || fs < 0 {
-		friendScore = 0 // No friend to share with.
-	}
-
-	return score, friendScore
+	return scores
 }
 
 // RankValue returns the numerical value of a rank for comparison.
