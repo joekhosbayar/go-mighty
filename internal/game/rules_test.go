@@ -286,67 +286,97 @@ func TestFirstTrickMightyFollowSuitRestriction(t *testing.T) {
 	}
 }
 
-func TestScoring(t *testing.T) {
-	t.Parallel()
-	g := New("test-scoring")
+// scoringGame builds a finished-hand game where the caller team has captured
+// `teamPoints` scoring cards. Seats 0-4 are all filled. Seat 0 is the declarer.
+// With a friend, seat 1 holds the called card; secretSolo puts it in seat 0's
+// own hand so friendSeat() resolves to the declarer.
+func scoringGame(bid int, noTrump, noFriend, secretSolo bool, teamPoints int) *Game {
+	g := New("score")
 	g.Declarer = 0
-	// Friend is seat 1: place the called card in seat 1's hand so friendSeat()
-	// resolves to 1 (scoring no longer reads PartnerSeat).
-	g.PartnerCard = &Card{Suit: Hearts, Rank: King}
-	g.Players[1] = &Player{ID: "p1", Seat: 1, Hand: []Card{{Suit: Hearts, Rank: King}}}
-	g.Contract = &Bid{Points: 7, Suit: Spades, IsNoTrump: false}
-
-	// Simulate 8 tricks won by team (Declarer + Partner)
-	for range 8 {
-		g.Tricks = append(g.Tricks, Trick{Winner: 0})
+	g.Contract = &Bid{Points: bid, Suit: Spades, IsNoTrump: noTrump}
+	for i := 0; i < 5; i++ {
+		g.Players[i] = &Player{ID: fmt.Sprintf("p%d", i), Seat: i}
 	}
-	// 2 tricks won by opponents
-	for range 2 {
-		g.Tricks = append(g.Tricks, Trick{Winner: 2})
+	switch {
+	case noFriend:
+		g.IsNoFriend = true
+	case secretSolo:
+		g.PartnerCard = &Card{Suit: Hearts, Rank: King}
+		g.Players[0].Hand = []Card{{Suit: Hearts, Rank: King}}
+	default:
+		g.PartnerCard = &Card{Suit: Hearts, Rank: King}
+		g.Players[1].Hand = []Card{{Suit: Hearts, Rank: King}}
 	}
+	// All the team's captured scoring cards sit on the declarer's pile; only
+	// the length is read, so zero-value cards are fine.
+	g.Players[0].Points = make([]Card, teamPoints)
+	return g
+}
 
-	// 7-spade bid, 8 tricks won -> 7*10 + 1*5 = 75
-	score, friendScore := g.CalculateFinalScore()
-	if score != 75 {
-		t.Errorf("Expected score 75, got %v", score)
+func TestCalculateFinalScore(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                    string
+		bid                     int
+		noTrump, noFriend, solo bool
+		teamPoints              int
+		wantDeclarer            int
+		wantPartner             int // meaningful only when a partner exists
+		wantOpp                 int
+	}{
+		{"success 15d 16pts", 5, false, false, false, 16, 10, 5, -5},
+		{"fail 15d 13pts", 5, false, false, false, 13, -4, -2, 2},
+		{"success 16nt 18pts", 6, true, false, false, 18, 32, 16, -16},
+		{"fail 16nt 13pts", 6, true, false, false, 13, -12, -6, 6},
+		{"run 17h 20pts", 7, false, false, false, 20, 44, 22, -22},
+		{"alone 16nt 17pts", 6, true, true, false, 17, 112, 0, -28},
+		{"alone fail 16nt 15pts", 6, true, true, false, 15, -16, 0, 4},
+		{"zero payment bid3 13pts", 3, false, false, false, 13, 0, 0, 0},
+		{"back run bid5 9pts", 5, false, false, false, 9, -24, -12, 12},
+		{"secret solo 15s 16pts", 5, false, false, true, 16, 20, 0, -5},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := scoringGame(tc.bid, tc.noTrump, tc.noFriend, tc.solo, tc.teamPoints)
+			got := g.CalculateFinalScore()
 
-	if friendScore != 37.5 {
-		t.Errorf("Expected friend score 37.5, got %v", friendScore)
+			if got[0] != tc.wantDeclarer {
+				t.Errorf("declarer: got %d, want %d", got[0], tc.wantDeclarer)
+			}
+			if !tc.noFriend && !tc.solo && got[1] != tc.wantPartner {
+				t.Errorf("partner: got %d, want %d", got[1], tc.wantPartner)
+			}
+			// Every opponent seat pays/collects the same amount.
+			for _, seat := range oppSeats(g) {
+				if got[seat] != tc.wantOpp {
+					t.Errorf("opp seat %d: got %d, want %d", seat, got[seat], tc.wantOpp)
+				}
+			}
+			// Zero-sum invariant.
+			sum := 0
+			for _, v := range got {
+				sum += v
+			}
+			if sum != 0 {
+				t.Errorf("scores must sum to zero, got %d (%v)", sum, got)
+			}
+		})
 	}
+}
 
-	// Test No-Trump Multiplier
-	g.Contract.IsNoTrump = true
-
-	score, _ = g.CalculateFinalScore()
-	if score != 150 { // 75 * 2
-		t.Errorf("Expected No-Trump score 150, got %v", score)
+// oppSeats returns the seats that are neither the declarer nor a revealed partner.
+func oppSeats(g *Game) []int {
+	declarer := g.Declarer
+	fs := g.friendSeat()
+	partner := fs >= 0 && fs != declarer
+	var seats []int
+	for seat, p := range g.Players {
+		if p == nil || seat == declarer || (partner && seat == fs) {
+			continue
+		}
+		seats = append(seats, seat)
 	}
-
-	// Test No-Friend Multiplier
-	g.IsNoFriend = true
-
-	score, friendScore = g.CalculateFinalScore()
-	if score != 300 { // 150 * 2
-		t.Errorf("Expected No-Friend score 300, got %v", score)
-	}
-
-	if friendScore != 0 {
-		t.Errorf("Expected friend score 0 for No-Friend game")
-	}
-
-	// Test 10-bid Multiplier
-	g.Contract.Points = 10
-	// Recalculate tricks won (all 10 now for 10-bid)
-	g.Tricks = nil
-	for range 10 {
-		g.Tricks = append(g.Tricks, Trick{Winner: 0})
-	}
-	// 10-bid, 10 tricks, NT, NoFriend -> (10*10)*2*2*2 = 800
-	score, _ = g.CalculateFinalScore()
-	if score != 800 {
-		t.Errorf("Expected ultimate score 800, got %v", score)
-	}
+	return seats
 }
 
 func TestValidateBid_NoTrumpAndSuitValidation(t *testing.T) {

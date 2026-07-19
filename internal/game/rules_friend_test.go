@@ -331,45 +331,42 @@ func TestUnplayedCalledCardScoresDeclarerAloneWithoutDoubling(t *testing.T) {
 	g.PartnerCard = &Card{Suit: Diamonds, Rank: Ace} // stayed in the kitty
 	g.PartnerSeat = -1
 	g.IsNoFriend = false
-	// Declarer alone wins exactly the 7-trick contract.
-	g.Tricks = make([]Trick, 10)
-	for i := range g.Tricks {
-		if i < 7 {
-			g.Tricks[i].Winner = 0
-		} else {
-			g.Tricks[i].Winner = 3
+	// Declarer alone captures exactly the bid-7 target (17 scoring cards):
+	// target = bid(7) + 10 = 17, S = 2*(7-3) + (17-17) = 8, no doublings apply.
+	g.Players[0].Points = make([]Card, 17)
+
+	scores := g.CalculateFinalScore()
+	if scores[0] != 32 {
+		t.Fatalf("expected declarer 32 (no x2 doubling), got %v", scores[0])
+	}
+
+	for seat := 1; seat < 5; seat++ {
+		if scores[seat] != -8 {
+			t.Fatalf("expected opponent seat %d to be -8, got %v", seat, scores[seat])
 		}
-	}
-
-	declarer, friend := g.CalculateFinalScore()
-	if declarer != 70 {
-		t.Fatalf("expected 70 (no x2 doubling), got %v", declarer)
-	}
-
-	if friend != 0 {
-		t.Fatalf("expected friend score 0 with no revealed partner, got %v", friend)
 	}
 }
 
-func TestScoringCountsRevealedPartnerTricks(t *testing.T) {
+func TestScoringCountsRevealedPartnerPoints(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name              string
-		contract          int
-		declarerTricks    int
-		partnerTricks     int
-		noTrump, noFriend bool
-		wantDeclarer      float64
-		wantFriend        float64
+		name                      string
+		contract                  int
+		declarerPoints            int
+		partnerPoints             int
+		noTrump                   bool
+		wantDeclarer, wantPartner int
+		wantOpp                   int
 	}{
-		{name: "exact contract split", contract: 7, declarerTricks: 4, partnerTricks: 3, wantDeclarer: 70, wantFriend: 35},
-		{name: "overtricks", contract: 7, declarerTricks: 5, partnerTricks: 4, wantDeclarer: 80, wantFriend: 40},
-		{name: "down one", contract: 7, declarerTricks: 4, partnerTricks: 2, wantDeclarer: -70, wantFriend: -35},
-		{name: "down two adds penalty", contract: 7, declarerTricks: 3, partnerTricks: 2, wantDeclarer: -75, wantFriend: -37.5},
-		{name: "no trump doubles", contract: 7, declarerTricks: 4, partnerTricks: 3, noTrump: true, wantDeclarer: 140, wantFriend: 70},
-		{name: "ten bid doubles", contract: 10, declarerTricks: 6, partnerTricks: 4, wantDeclarer: 200, wantFriend: 100},
-		{name: "cap at 800", contract: 10, declarerTricks: 10, partnerTricks: 0, noTrump: true, noFriend: true, wantDeclarer: 800, wantFriend: 0},
+		{name: "exact contract split", contract: 7, declarerPoints: 10, partnerPoints: 7, wantDeclarer: 16, wantPartner: 8, wantOpp: -8},
+		{name: "overtricks", contract: 7, declarerPoints: 12, partnerPoints: 7, wantDeclarer: 20, wantPartner: 10, wantOpp: -10},
+		{name: "down one", contract: 7, declarerPoints: 9, partnerPoints: 7, wantDeclarer: -2, wantPartner: -1, wantOpp: 1},
+		{name: "down two", contract: 7, declarerPoints: 8, partnerPoints: 7, wantDeclarer: -4, wantPartner: -2, wantOpp: 2},
+		{name: "no trump doubles", contract: 7, declarerPoints: 10, partnerPoints: 7, noTrump: true, wantDeclarer: 32, wantPartner: 16, wantOpp: -16},
+		// bid 10 -> target 20, the entire deck: any successful bid-10 contract
+		// captures all 20 scoring cards and is therefore always also a run.
+		{name: "bid 10 success is always a run", contract: 10, declarerPoints: 13, partnerPoints: 7, wantDeclarer: 56, wantPartner: 28, wantOpp: -28},
 	}
 
 	for _, tc := range cases {
@@ -382,32 +379,46 @@ func TestScoringCountsRevealedPartnerTricks(t *testing.T) {
 				g.Contract.Suit = None
 			}
 
-			g.IsNoFriend = tc.noFriend
 			// Friend is seat 1: place the called card in seat 1's hand so
-			// friendSeat() resolves to 1 (noFriend still forces -1).
+			// friendSeat() resolves to 1.
 			g.PartnerCard = &Card{Suit: Hearts, Rank: King}
 			g.Players[1].Hand = []Card{{Suit: Hearts, Rank: King}}
 
-			g.Tricks = make([]Trick, 10)
-			seat := 0
+			g.Players[0].Points = make([]Card, tc.declarerPoints)
+			g.Players[1].Points = make([]Card, tc.partnerPoints)
 
-			for i := range g.Tricks {
-				switch {
-				case seat < tc.declarerTricks:
-					g.Tricks[i].Winner = 0
-				case seat < tc.declarerTricks+tc.partnerTricks:
-					g.Tricks[i].Winner = 1
-				default:
-					g.Tricks[i].Winner = 3
-				}
-				seat++
+			scores := g.CalculateFinalScore()
+			if scores[0] != tc.wantDeclarer || scores[1] != tc.wantPartner {
+				t.Fatalf("got (declarer=%v, partner=%v), want (%v, %v)", scores[0], scores[1], tc.wantDeclarer, tc.wantPartner)
 			}
-
-			declarer, friend := g.CalculateFinalScore()
-			if declarer != tc.wantDeclarer || friend != tc.wantFriend {
-				t.Fatalf("got (%v, %v), want (%v, %v)", declarer, friend, tc.wantDeclarer, tc.wantFriend)
+			for seat := 2; seat < 5; seat++ {
+				if scores[seat] != tc.wantOpp {
+					t.Fatalf("opp seat %d: got %v, want %v", seat, scores[seat], tc.wantOpp)
+				}
 			}
 		})
+	}
+}
+
+// TestScoringHasNoCap regression-tests the removal of the old +/-800 cap:
+// bid 10 (target 20, the whole deck) played alone under no-trump stacks all
+// three doublings (run x2, no-trump x2, no-friend x2) well past 800.
+func TestScoringHasNoCap(t *testing.T) {
+	t.Parallel()
+
+	g := callingGame()
+	g.Contract = &Bid{PlayerID: "p0", Points: 10, Suit: None, IsNoTrump: true}
+	g.IsNoFriend = true
+	g.Players[0].Points = make([]Card, 20)
+
+	scores := g.CalculateFinalScore()
+	if scores[0] != 448 {
+		t.Fatalf("expected declarer 448 (no cap), got %v", scores[0])
+	}
+	for seat := 1; seat < 5; seat++ {
+		if scores[seat] != -112 {
+			t.Fatalf("expected opponent seat %d to be -112, got %v", seat, scores[seat])
+		}
 	}
 }
 
