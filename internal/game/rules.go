@@ -111,8 +111,8 @@ func (g *Game) validateBid(p *Player, payload any) error {
 		return fmt.Errorf("%w: not your turn to bid", ErrInvalidMove)
 	}
 
-	if bid.Points < 3 || bid.Points > 10 {
-		return fmt.Errorf("%w: bid points must be between 3 and 10", ErrInvalidMove)
+	if bid.Points < g.minBidPoints() || bid.Points > 10 {
+		return fmt.Errorf("%w: bid points must be between %d and 10", ErrInvalidMove, g.minBidPoints())
 	}
 
 	if bid.IsNoTrump {
@@ -216,7 +216,11 @@ func (g *Game) validateCallPartner(p *Player, payload any) error {
 
 	if move.Card != nil {
 		isJoker := move.Card.Suit == None && move.Card.Rank == Joker
-		if !isJoker {
+		if isJoker {
+			if g.Config.NumPlayers == 4 && !g.Config.AllowJokerPartner {
+				return fmt.Errorf("%w: joker may not be called as partner in this game", ErrInvalidMove)
+			}
+		} else {
 			if _, ok := suitRank[move.Card.Suit]; !ok || !validRanks[move.Card.Rank] {
 				return fmt.Errorf("%w: invalid partner card", ErrInvalidMove)
 			}
@@ -513,7 +517,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		g.CurrentBid = &bid
 		g.Declarer = p.Seat                  // Potential declarer
 
-		if bid.Points == 10 || len(g.PassedPlayers) == 4 {
+		if bid.Points == 10 || len(g.PassedPlayers) == g.numSeats()-1 {
 			// Auto-resolve if maximum bid is reached or all others passed
 			g.Status = PhaseExchanging
 			g.Contract = g.CurrentBid
@@ -531,7 +535,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		g.PassedPlayers[p.Seat] = true
 		g.advanceToNextBidder()
 		// Check if bidding ended
-		if len(g.PassedPlayers) == 4 && g.CurrentBid != nil {
+		if len(g.PassedPlayers) == g.numSeats()-1 && g.CurrentBid != nil {
 			g.Status = PhaseExchanging
 			// Set final declarer (should be already set by last bid)
 			g.Contract = g.CurrentBid
@@ -542,7 +546,7 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 			declarer := g.Players[g.Declarer]
 			declarer.Hand = append(declarer.Hand, g.Kitty...)
 			g.Kitty = nil // Empty kitty
-		} else if len(g.PassedPlayers) == 5 {
+		} else if len(g.PassedPlayers) == g.numSeats() {
 			// Everyone passed: throw the hand in and redeal.
 			g.Bids = nil
 			g.CurrentBid = nil
@@ -657,10 +661,10 @@ func (g *Game) ApplyMove(playerID string, moveType MoveType, payload any) error 
 		}
 
 		// Turn moves to next
-		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		g.CurrentTurn = (g.CurrentTurn + 1) % g.numSeats()
 
 		// Check if trick finished
-		if len(g.Tricks[idx].Cards) == 5 {
+		if len(g.Tricks[idx].Cards) == g.numSeats() {
 			winnerSeat, points := g.ResolveTrick(g.Tricks[idx])
 			g.Tricks[idx].Winner = winnerSeat
 
@@ -812,7 +816,7 @@ func (g *Game) CalculateFinalScore() map[int]int {
 
 	var s int
 	if success {
-		s = 2*(g.Contract.Points-3) + (p - target)
+		s = 2*(g.Contract.Points-g.minBidPoints()) + (p - target)
 	} else {
 		s = target - p
 	}
@@ -840,8 +844,40 @@ func (g *Game) CalculateFinalScore() map[int]int {
 		partnerShare = s
 	}
 
-	// Distribution (sums to zero): each opponent pays S, the partner collects S,
-	// the declarer collects the remainder. Every sign flips on failure.
+	// A configured four-player 2-vs-2 failure uses a special split; every other
+	// case (all wins, all alone games, and every five-player result) uses the
+	// standard formula where each opponent pays S, the partner collects S, and
+	// the declarer collects the remainder, with signs flipped on failure.
+	special := !success && partnerPresent && g.Config.NumPlayers == 4 &&
+		(g.Config.FailDist == FailDeclarerAlone || g.Config.FailDist == FailTwoOneSplit)
+
+	if special {
+		var declarerPay, partnerPay, oppGain int
+		switch g.Config.FailDist {
+		case FailDeclarerAlone:
+			declarerPay, partnerPay, oppGain = 2*s, 0, s
+		default: // FailTwoOneSplit
+			oppGain = (3*s + 1) / 2 // ceil(1.5*s)
+			partnerPay = s
+			declarerPay = 2*oppGain - partnerPay // 2s if s even, 2s+1 if s odd
+		}
+		for seat, player := range g.Players {
+			if player == nil {
+				continue
+			}
+			switch {
+			case seat == declarer:
+				scores[seat] = -declarerPay
+			case seat == fs:
+				scores[seat] = -partnerPay
+			default:
+				scores[seat] = oppGain
+			}
+		}
+		return scores
+	}
+
+	// Standard distribution (sums to zero).
 	for seat, player := range g.Players {
 		if player == nil {
 			continue
@@ -897,11 +933,11 @@ func RankValue(r Rank) int {
 
 // advanceToNextBidder advances the current turn to the next player who has not passed.
 func (g *Game) advanceToNextBidder() {
-	if len(g.PassedPlayers) >= 5 {
+	if len(g.PassedPlayers) >= g.numSeats() {
 		return
 	}
 	for {
-		g.CurrentTurn = (g.CurrentTurn + 1) % 5
+		g.CurrentTurn = (g.CurrentTurn + 1) % g.numSeats()
 		if !g.PassedPlayers[g.CurrentTurn] {
 			break
 		}

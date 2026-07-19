@@ -95,21 +95,32 @@ func (c Card) IsPointCard() bool {
 // Deck represents a deck of cards.
 type Deck []Card
 
-// NewDeck creates a standard 53-card deck (52 + 1 Joker).
+// NewDeck creates a standard 53-card deck (52 + 1 Joker) for five players.
 func NewDeck() Deck {
+	return NewDeckFor(5)
+}
+
+// NewDeckFor builds the deck for the given player count: 53 cards for five
+// players, or 43 for four players (all 2s, all 4s, and the two red 3s removed).
+func NewDeckFor(numPlayers int) Deck {
 	suits := []Suit{Spades, Diamonds, Hearts, Clubs}
 	ranks := []Rank{Ace, King, Queen, Jack, Ten, Nine, Eight, Seven, Six, Five, Four, Three, Two}
 
 	deck := make(Deck, 0, 53)
-
 	for _, s := range suits {
 		for _, r := range ranks {
+			if numPlayers == 4 {
+				if r == Two || r == Four {
+					continue
+				}
+				if r == Three && (s == Hearts || s == Diamonds) {
+					continue
+				}
+			}
 			deck = append(deck, Card{Suit: s, Rank: r})
 		}
 	}
-
 	deck = append(deck, Card{Suit: None, Rank: Joker})
-
 	return deck
 }
 
@@ -120,35 +131,25 @@ func (d Deck) Shuffle() {
 	})
 }
 
-// Deal distributed cards to 5 players (10 each) and kitty (3)
-// Returns 5 hands and the kitty.
-func (d Deck) Deal() ([5][]Card, []Card) {
-	if len(d) != 53 {
-		// Should unlikely happen if fresh deck
-		return [5][]Card{}, nil
+// Deal distributes 10 cards to each of numPlayers players and 3 to the kitty.
+// Returns the hands (one slice per player) and the kitty.
+func (d Deck) Deal(numPlayers int) ([][]Card, []Card) {
+	expected := numPlayers*10 + 3
+	if len(d) != expected {
+		return nil, nil
 	}
 
-	hands := [5][]Card{}
-	// Mighty dealing: 1 -> 2 -> 3 -> 4 is common, or just purely random.
-	// We'll just deal sequentially for simplicity as shuffle is random.
-
-	// Implementation:
-	// Players 0-4 get 10 cards each. Top 50 cards used.
-	// Last 3 cards go to kitty.
-
-	// Actually, let's just slice it.
+	hands := make([][]Card, numPlayers)
 	k := 0
-
-	for i := range 5 {
+	for i := 0; i < numPlayers; i++ {
 		hands[i] = make([]Card, 10)
-		for j := range 10 {
+		for j := 0; j < 10; j++ {
 			hands[i][j] = d[k]
 			k++
 		}
 	}
 
 	kitty := make([]Card, 3)
-	copy(kitty, d[50:])
-
+	copy(kitty, d[k:])
 	return hands, kitty
 }

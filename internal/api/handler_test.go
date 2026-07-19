@@ -469,14 +469,16 @@ func (m *mockConn) SetWriteDeadline(_ time.Time) error { return nil }
 // busyGameService fails every ProcessMove with lock contention.
 type busyGameService struct{}
 
-func (busyGameService) CreateGame(_ context.Context, _ string) (*game.Game, error) { return nil, nil }
+func (busyGameService) CreateGame(_ context.Context, _ string, _ game.GameConfig) (*game.Game, error) {
+	return nil, nil
+}
 func (busyGameService) JoinGame(_ context.Context, _, _, _ string) (*game.Game, error) {
 	return nil, service.ErrGameBusy
 }
 func (busyGameService) ProcessMove(_ context.Context, _, _ string, _ game.MoveType, _ any, _ int64) (*game.Game, error) {
 	return nil, service.ErrGameBusy
 }
-func (busyGameService) Subscribe(_ context.Context, _ string) *goredis.PubSub { return nil }
+func (busyGameService) Subscribe(_ context.Context, _ string) *goredis.PubSub   { return nil }
 func (busyGameService) GetGame(_ context.Context, _ string) (*game.Game, error) { return nil, nil }
 func (busyGameService) ListGamesByStatus(_ context.Context, _ game.Phase) ([]*game.Game, error) {
 	return nil, nil
