@@ -33,7 +33,7 @@ type fakeWSGameService struct {
 	processMoveErr    error
 }
 
-func (f *fakeWSGameService) CreateGame(_ context.Context, _ string) (*game.Game, error) {
+func (f *fakeWSGameService) CreateGame(_ context.Context, _ string, _ game.GameConfig) (*game.Game, error) {
 	return nil, nil
 }
 

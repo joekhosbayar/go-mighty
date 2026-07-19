@@ -19,7 +19,7 @@ import (
 
 // GameService defines the interface for game logic operations.
 type GameService interface {
-	CreateGame(ctx context.Context, id string) (*game.Game, error)
+	CreateGame(ctx context.Context, id string, cfg game.GameConfig) (*game.Game, error)
 	JoinGame(ctx context.Context, gameID, playerID, playerName string) (*game.Game, error)
 	ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload any, clientVersion int64) (*game.Game, error)
 	Subscribe(ctx context.Context, gameID string) *redis.PubSub
@@ -145,8 +145,29 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 
 	actualID := uuid.NewString()
 
+	cfg := game.DefaultConfig()
+	if r.Body != nil {
+		var req struct {
+			NumPlayers        int    `json:"num_players"`
+			AllowJokerPartner *bool  `json:"allow_joker_partner"`
+			FailDist          string `json:"fail_dist"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			if req.NumPlayers == 4 || req.NumPlayers == 5 {
+				cfg.NumPlayers = req.NumPlayers
+			}
+			if req.AllowJokerPartner != nil {
+				cfg.AllowJokerPartner = *req.AllowJokerPartner
+			}
+			switch game.FailDist(req.FailDist) {
+			case game.FailEqualSplit, game.FailDeclarerAlone, game.FailTwoOneSplit:
+				cfg.FailDist = game.FailDist(req.FailDist)
+			}
+		}
+	}
+
 	// Create the game
-	g, err := h.svc.CreateGame(r.Context(), actualID)
+	g, err := h.svc.CreateGame(r.Context(), actualID, cfg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

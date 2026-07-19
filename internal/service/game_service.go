@@ -67,8 +67,8 @@ func (s *Game) withGameLock(ctx context.Context, gameID string) (release func(),
 }
 
 // CreateGame initializes a new game and persists it in both Postgres and Redis.
-func (s *Game) CreateGame(ctx context.Context, id string) (*game.Game, error) {
-	g := game.New(id)
+func (s *Game) CreateGame(ctx context.Context, id string, cfg game.GameConfig) (*game.Game, error) {
+	g := game.NewWithConfig(id, cfg)
 
 	// Save to Postgres (ledger)
 	if err := s.postgresStore.CreateGame(ctx, g); err != nil {
@@ -125,9 +125,10 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 		}
 	}
 
-	// If not already in the game, find the first available seat
-	for i, p := range g.Players {
-		if p == nil {
+	// If not already in the game, find the first available seat within the
+	// configured number of seats.
+	for i := 0; i < g.NumSeatsPublic(); i++ {
+		if g.Players[i] == nil {
 			seat = i
 			break
 		}

@@ -33,6 +33,9 @@ func (g *Game) numSeats() int {
 	return g.Config.NumPlayers
 }
 
+// NumSeatsPublic exposes the seat count to other packages.
+func (g *Game) NumSeatsPublic() int { return g.numSeats() }
+
 // minBidPoints is the lowest legal bid on the 3-10 scale: 3 (target 13) for
 // five players, 4 (target 14) for four players.
 func (g *Game) minBidPoints() int {
