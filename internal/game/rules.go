@@ -216,7 +216,11 @@ func (g *Game) validateCallPartner(p *Player, payload any) error {
 
 	if move.Card != nil {
 		isJoker := move.Card.Suit == None && move.Card.Rank == Joker
-		if !isJoker {
+		if isJoker {
+			if g.Config.NumPlayers == 4 && !g.Config.AllowJokerPartner {
+				return fmt.Errorf("%w: joker may not be called as partner in this game", ErrInvalidMove)
+			}
+		} else {
 			if _, ok := suitRank[move.Card.Suit]; !ok || !validRanks[move.Card.Rank] {
 				return fmt.Errorf("%w: invalid partner card", ErrInvalidMove)
 			}

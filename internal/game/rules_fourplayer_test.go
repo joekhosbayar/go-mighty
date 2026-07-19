@@ -56,3 +56,31 @@ func TestFourPlayerAllPassRedeals(t *testing.T) {
 		t.Errorf("passed players should reset, got %d", len(g.PassedPlayers))
 	}
 }
+
+func callPartnerGame(t *testing.T, allowJoker bool) *Game {
+	t.Helper()
+	g := NewWithConfig("joker4", GameConfig{NumPlayers: 4, AllowJokerPartner: allowJoker, FailDist: FailEqualSplit})
+	for i := 0; i < 4; i++ {
+		g.Players[i] = &Player{ID: string(rune('A' + i)), Seat: i}
+	}
+	g.Declarer = 0
+	g.Status = PhaseCalling
+	return g
+}
+
+func TestFourPlayerJokerPartnerRejectedWhenDisallowed(t *testing.T) {
+	g := callPartnerGame(t, false)
+	joker := Card{Suit: None, Rank: Joker}
+	err := g.ValidateMove(g.Players[0].ID, MoveCallPartner, CallPartnerMove{Card: &joker})
+	if !errors.Is(err, ErrInvalidMove) {
+		t.Fatalf("joker partner should be rejected when disallowed, got %v", err)
+	}
+}
+
+func TestFourPlayerJokerPartnerAllowedWhenEnabled(t *testing.T) {
+	g := callPartnerGame(t, true)
+	joker := Card{Suit: None, Rank: Joker}
+	if err := g.ValidateMove(g.Players[0].ID, MoveCallPartner, CallPartnerMove{Card: &joker}); err != nil {
+		t.Fatalf("joker partner should be allowed when enabled, got %v", err)
+	}
+}
