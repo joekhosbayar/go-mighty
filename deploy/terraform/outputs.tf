@@ -9,3 +9,11 @@ output "deploy_bucket" {
 output "name_servers" {
   value = aws_route53_zone.main.name_servers
 }
+
+output "instance_id" {
+  value = aws_instance.api.id
+}
+
+output "public_ip" {
+  value = aws_eip.api.public_ip
+}
