@@ -79,6 +79,7 @@ type Bid struct {
 type Game struct {
 	ID      string     `json:"id"`
 	Status  Phase      `json:"status"`
+	Config  GameConfig `json:"config"`
 	Players [5]*Player `json:"players"`
 	Kitty   []Card     `json:"kitty,omitempty"` // hidden usually
 
@@ -128,11 +129,23 @@ type PlayedCard struct {
 	Card     Card   `json:"card"`
 }
 
-// New creates a new game instance.
+// New creates a new five-player game instance.
 func New(id string) *Game {
+	return NewWithConfig(id, DefaultConfig())
+}
+
+// NewWithConfig creates a new game with the given configuration.
+func NewWithConfig(id string, cfg GameConfig) *Game {
+	if cfg.NumPlayers == 0 {
+		cfg.NumPlayers = 5
+	}
+	if cfg.FailDist == "" {
+		cfg.FailDist = FailEqualSplit
+	}
 	g := &Game{
 		ID:            id,
 		Status:        PhaseWaiting,
+		Config:        cfg,
 		Players:       [5]*Player{},
 		PassedPlayers: make(map[int]bool),
 		Tricks:        make([]Trick, 0),
@@ -143,7 +156,6 @@ func New(id string) *Game {
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
-
 	return g
 }
 
