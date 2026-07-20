@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,9 +25,10 @@ import (
 
 type apiFeature struct {
 	client       *resty.Client
+	baseURL      string
 	lastResponse *resty.Response
-	tokens       map[string]string // original_name -> JWT
-	userIDs      map[string]string // original_name -> UUID
+	tokens       map[string]string // original_name -> Cognito access token
+	userIDs      map[string]string // original_name -> Cognito sub
 	realNames    map[string]string // original_name -> unique_username
 	activeGameID string
 	game         *game.Game
@@ -36,6 +38,57 @@ type apiFeature struct {
 	// WebSocket subscriber state
 	wsConn      *websocket.Conn
 	wsLastEvent string
+
+	// Cognito configuration and cleanup bookkeeping.
+	cognitoPoolID   string
+	cognitoClientID string
+	createdUsers    []string // Cognito usernames created during the run, deleted at suite teardown
+}
+
+// cognitoAuthResult is the subset of `aws cognito-idp admin-initiate-auth`
+// JSON output this suite needs.
+type cognitoAuthResult struct {
+	AuthenticationResult struct {
+		AccessToken string `json:"AccessToken"`
+	} `json:"AuthenticationResult"`
+}
+
+// cognitoUserResult is the subset of `aws cognito-idp admin-get-user` JSON
+// output this suite needs.
+type cognitoUserResult struct {
+	UserAttributes []struct {
+		Name  string `json:"Name"`
+		Value string `json:"Value"`
+	} `json:"UserAttributes"`
+}
+
+// runAWSCLI shells out to the `aws` CLI and returns stdout, wrapping stderr
+// into the error on failure so test output stays legible.
+func runAWSCLI(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "aws", args...)
+
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, fmt.Errorf("aws %s: %w: %s", strings.Join(args, " "), err, string(exitErr.Stderr))
+		}
+
+		return nil, fmt.Errorf("aws %s: %w", strings.Join(args, " "), err)
+	}
+
+	return out, nil
+}
+
+// cleanupCognitoUsers best-effort deletes every user this run created. It
+// runs at suite teardown regardless of scenario pass/fail.
+func (a *apiFeature) cleanupCognitoUsers() {
+	for _, username := range a.createdUsers {
+		_, _ = runAWSCLI(context.Background(), "cognito-idp", "admin-delete-user",
+			"--user-pool-id", a.cognitoPoolID,
+			"--username", username,
+		)
+	}
 }
 
 var userCounter atomic.Int32
@@ -66,43 +119,107 @@ func (a *apiFeature) getUniqueUsername(username string) string {
 	return unique
 }
 
-func (a *apiFeature) iSignUpWithUsernameAndPasswordAndEmail(username, password, email string) error {
+// iSignUpWithUsernameAndPasswordAndEmail creates the user directly in the
+// live Cognito pool (there is no /auth/signup endpoint anymore) and records
+// its sub as the local user ID. The email parameter is ignored in favor of a
+// generated one, matching this suite's pre-Cognito behavior of always
+// deriving a collision-free address from the unique username.
+func (a *apiFeature) iSignUpWithUsernameAndPasswordAndEmail(username, password, _ string) error {
+	if a.cognitoPoolID == "" || a.cognitoClientID == "" {
+		return errors.New("E2E_COGNITO_POOL_ID and E2E_COGNITO_CLIENT_ID must be set")
+	}
+
 	uniqueUser := a.getUniqueUsername(username)
-	resp, err := a.client.R().SetBody(map[string]string{
-		"username": uniqueUser, "password": password, "email": uniqueUser + "@example.com",
-	}).Post("/auth/signup")
+	email := uniqueUser + "@example.com"
+	ctx := context.Background()
 
-	a.lastResponse = resp
-	if err == nil && resp.StatusCode() == http.StatusCreated {
-		var res map[string]any
-		if err := json.Unmarshal(resp.Body(), &res); err != nil {
-			return err
-		}
+	if _, err := runAWSCLI(ctx, "cognito-idp", "admin-create-user",
+		"--user-pool-id", a.cognitoPoolID,
+		"--username", uniqueUser,
+		"--user-attributes",
+		"Name=email,Value="+email,
+		"Name=email_verified,Value=true",
+		"Name=preferred_username,Value="+uniqueUser,
+		"--message-action", "SUPPRESS",
+	); err != nil {
+		return fmt.Errorf("admin-create-user: %w", err)
+	}
 
-		if id, ok := res["id"].(string); ok {
-			a.userIDs[username] = id
+	a.createdUsers = append(a.createdUsers, uniqueUser)
+
+	if _, err := runAWSCLI(ctx, "cognito-idp", "admin-set-user-password",
+		"--user-pool-id", a.cognitoPoolID,
+		"--username", uniqueUser,
+		"--password", password,
+		"--permanent",
+	); err != nil {
+		return fmt.Errorf("admin-set-user-password: %w", err)
+	}
+
+	out, err := runAWSCLI(ctx, "cognito-idp", "admin-get-user",
+		"--user-pool-id", a.cognitoPoolID,
+		"--username", uniqueUser,
+		"--output", "json",
+	)
+	if err != nil {
+		return fmt.Errorf("admin-get-user: %w", err)
+	}
+
+	var user cognitoUserResult
+	if err := json.Unmarshal(out, &user); err != nil {
+		return fmt.Errorf("decode admin-get-user output: %w", err)
+	}
+
+	for _, attr := range user.UserAttributes {
+		if attr.Name == "sub" {
+			a.userIDs[username] = attr.Value
+			break
 		}
 	}
 
-	return err
+	// No real HTTP call is made anymore; synthesize the response the
+	// feature files still assert on ("the response status should be 201").
+	a.lastResponse = &resty.Response{RawResponse: &http.Response{StatusCode: http.StatusCreated}}
+
+	return nil
 }
 
+// iLoginWithUsernameAndPassword authenticates the already-created Cognito
+// user via admin-initiate-auth and stores the resulting access token.
 func (a *apiFeature) iLoginWithUsernameAndPassword(username, password string) error {
-	uniqueUser := a.getUniqueUsername(username)
-	resp, err := a.client.R().SetBody(map[string]string{
-		"username": uniqueUser, "password": password,
-	}).Post("/auth/login")
-
-	a.lastResponse = resp
-	if err == nil && resp.StatusCode() == http.StatusOK {
-		var res map[string]string
-		if err := json.Unmarshal(resp.Body(), &res); err != nil {
-			return err
-		}
-		a.tokens[username] = res["token"]
+	if a.cognitoPoolID == "" || a.cognitoClientID == "" {
+		return errors.New("E2E_COGNITO_POOL_ID and E2E_COGNITO_CLIENT_ID must be set")
 	}
 
-	return err
+	uniqueUser := a.getUniqueUsername(username)
+
+	out, err := runAWSCLI(context.Background(), "cognito-idp", "admin-initiate-auth",
+		"--user-pool-id", a.cognitoPoolID,
+		"--client-id", a.cognitoClientID,
+		"--auth-flow", "ADMIN_USER_PASSWORD_AUTH",
+		"--auth-parameters", "USERNAME="+uniqueUser+",PASSWORD="+password,
+		"--output", "json",
+	)
+	if err != nil {
+		return fmt.Errorf("admin-initiate-auth: %w", err)
+	}
+
+	var authResult cognitoAuthResult
+	if err := json.Unmarshal(out, &authResult); err != nil {
+		return fmt.Errorf("decode admin-initiate-auth output: %w", err)
+	}
+
+	if authResult.AuthenticationResult.AccessToken == "" {
+		return errors.New("admin-initiate-auth returned no access token")
+	}
+
+	a.tokens[username] = authResult.AuthenticationResult.AccessToken
+
+	// No real HTTP call is made anymore; synthesize the response the
+	// feature files still assert on ("the response status should be 200").
+	a.lastResponse = &resty.Response{RawResponse: &http.Response{StatusCode: http.StatusOK}}
+
+	return nil
 }
 
 func (a *apiFeature) iAmLoggedInAs(username string) error {
@@ -345,14 +462,10 @@ func (a *apiFeature) seatThatPlayedCalledCard() int {
 	return -1
 }
 
-func InitializeScenario(ctx *godog.ScenarioContext) {
-	baseURL := os.Getenv("E2E_BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
-
-	api := &apiFeature{client: resty.New().SetBaseURL(baseURL)}
-
+// InitializeScenario wires godog steps to methods on the given apiFeature.
+// api is constructed once by TestFeatures (it carries Cognito config and
+// cross-scenario cleanup state), and reset per-scenario below.
+func InitializeScenario(ctx *godog.ScenarioContext, api *apiFeature) {
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		api.tokens = make(map[string]string)
 		api.userIDs = make(map[string]string)
@@ -594,7 +707,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 
 	// --- WebSocket steps ---
 	ctx.Step(`^a WebSocket client connects to game "([^"]*)" with an invalid token$`, func(_ string) error {
-		return api.connectWSWithToken(baseURL, "totally-invalid-jwt-token")
+		return api.connectWSWithToken(api.baseURL, "totally-invalid-jwt-token")
 	})
 	ctx.Step(`^the WebSocket should receive an error containing "([^"]*)"$`, func(expected string) error {
 		if api.wsConn == nil {
@@ -620,7 +733,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 			return fmt.Errorf("no token for user %q", username)
 		}
 
-		if err := api.connectWSWithToken(baseURL, token); err != nil {
+		if err := api.connectWSWithToken(api.baseURL, token); err != nil {
 			return err
 		}
 
@@ -684,8 +797,31 @@ func (a *apiFeature) connectWSWithToken(baseURL, token string) error {
 
 func TestFeatures(t *testing.T) {
 	t.Parallel()
+
+	poolID := os.Getenv("E2E_COGNITO_POOL_ID")
+	clientID := os.Getenv("E2E_COGNITO_CLIENT_ID")
+
+	if poolID == "" || clientID == "" {
+		t.Fatal("E2E_COGNITO_POOL_ID and E2E_COGNITO_CLIENT_ID must be set to run the e2e suite")
+	}
+
+	baseURL := os.Getenv("E2E_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+
+	api := &apiFeature{
+		client:          resty.New().SetBaseURL(baseURL),
+		baseURL:         baseURL,
+		cognitoPoolID:   poolID,
+		cognitoClientID: clientID,
+	}
+
 	suite := godog.TestSuite{
-		ScenarioInitializer: InitializeScenario,
+		TestSuiteInitializer: func(sctx *godog.TestSuiteContext) {
+			sctx.AfterSuite(api.cleanupCognitoUsers)
+		},
+		ScenarioInitializer: func(ctx *godog.ScenarioContext) { InitializeScenario(ctx, api) },
 		Options:             &godog.Options{Format: "pretty", Paths: []string{"features"}, TestingT: t},
 	}
 	if suite.Run() != 0 {

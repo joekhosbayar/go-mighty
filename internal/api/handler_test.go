@@ -15,7 +15,6 @@ import (
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
-	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -487,7 +486,7 @@ func (busyGameService) ListGamesByStatus(_ context.Context, _ game.Phase) ([]*ga
 func TestMoveHandlerMapsGameBusyTo409(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandler(busyGameService{}, service.NewAuth(&postgres.Store{}, "testsecret"))
+	h := NewHandler(busyGameService{}, &fakeValidator{claims: &service.AuthClaims{UserID: "user-1", Username: "alice"}})
 
 	req := httptest.NewRequest(http.MethodPost, "/games/g1/move",
 		strings.NewReader(`{"move_type":"pass","client_version":1,"payload":null}`))
@@ -505,7 +504,7 @@ func TestMoveHandlerMapsGameBusyTo409(t *testing.T) {
 func TestJoinHandlerMapsGameBusyTo409(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandler(busyGameService{}, service.NewAuth(&postgres.Store{}, "testsecret"))
+	h := NewHandler(busyGameService{}, &fakeValidator{claims: &service.AuthClaims{UserID: "user-1", Username: "alice"}})
 
 	req := httptest.NewRequest(http.MethodPost, "/games/g1/join", nil)
 	req.SetPathValue("id", "g1")

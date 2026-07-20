@@ -99,7 +99,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, err := h.authSvc.ValidateToken(authReq.Token)
+	claims, err := h.authSvc.ValidateToken(r.Context(), authReq.Token)
 	if err != nil {
 		sendError("unauthorized")
 		return

@@ -16,6 +16,12 @@ import (
 // ErrInvalidToken is returned for any token that fails JWKS validation.
 var ErrInvalidToken = errors.New("invalid token")
 
+// AuthClaims is the authenticated identity handed to the API layer.
+type AuthClaims struct {
+	UserID   string
+	Username string
+}
+
 // UserAttributesFetcher looks up Cognito user attributes not present in
 // access tokens (display name). Implementations must be safe for concurrent use.
 type UserAttributesFetcher interface {

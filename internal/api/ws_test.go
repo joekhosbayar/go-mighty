@@ -16,7 +16,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
-	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -113,7 +112,7 @@ func setupWSTestHandler(t *testing.T) (*Handler, func()) {
 		redisClient:   client,
 		processMoveCh: make(chan struct{}, 1),
 	}
-	authSvc := service.NewAuth(&postgres.Store{}, "testsecret")
+	authSvc := &fakeValidator{claims: &service.AuthClaims{UserID: "user-1", Username: "alice"}}
 	handler := NewHandler(svc, authSvc)
 
 	cleanup := func() {

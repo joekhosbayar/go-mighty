@@ -10,15 +10,28 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	"github.com/redis/go-redis/v9"
 )
+
+// fakeValidator is a shared TokenValidator test double used across the api
+// package tests in place of a real service.CognitoAuth. A nil claims field
+// makes every token (including non-empty ones) fail validation, matching
+// the previous "invalid token" behavior; a non-nil claims field authenticates
+// any non-empty token as that identity.
+type fakeValidator struct{ claims *service.AuthClaims }
+
+func (f *fakeValidator) ValidateToken(_ context.Context, token string) (*service.AuthClaims, error) {
+	if token == "" || f.claims == nil {
+		return nil, service.ErrInvalidToken
+	}
+
+	return f.claims, nil
+}
 
 const (
 	testGameID = "game-123"
@@ -65,25 +78,19 @@ func setupLobbyTestEnvWithRedis(t *testing.T, redisStore service.RedisStore) (*H
 
 	pgStore := postgres.NewStoreWithDB(db)
 	svc := service.NewGame(redisStore, pgStore)
-	authSvc := service.NewAuth(pgStore, "testsecret")
+	authSvc := &fakeValidator{claims: &service.AuthClaims{UserID: "player-1", Username: "alice"}}
 	handler := NewHandler(svc, authSvc)
 
 	return handler, mock, db
 }
 
-func generateValidToken(userID, username string) string {
-	claims := &service.AuthClaims{
-		UserID:   userID,
-		Username: username,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedToken, _ := token.SignedString([]byte("testsecret"))
-
-	return signedToken
+// generateValidToken returns a placeholder bearer token string. Its content
+// is irrelevant under fakeValidator — only its identity (the caller's
+// userID/username) matters, and that comes from the handler's fakeValidator,
+// not the token itself. Non-empty is all that's required for a successful
+// authentication.
+func generateValidToken(_, _ string) string {
+	return "valid-test-token"
 }
 
 func TestListGamesHandler_Success(t *testing.T) {
@@ -175,6 +182,7 @@ func TestJoinGameHandler_Unauthorized_InvalidToken(t *testing.T) {
 	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
 	defer func() { _ = db.Close() }()
+	handler.authSvc = &fakeValidator{}
 
 	payload := map[string]any{
 		"seat": 0,
@@ -251,6 +259,7 @@ func TestJoinGameHandler_GameFull(t *testing.T) {
 
 	handler, _, db := setupLobbyTestEnvWithRedis(t, redisStore)
 	defer func() { _ = db.Close() }()
+	handler.authSvc = &fakeValidator{claims: &service.AuthClaims{UserID: "player-new", Username: "alice"}}
 
 	token := generateValidToken("player-new", "alice")
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/join", nil)
@@ -289,6 +298,7 @@ func TestMoveHandler_Unauthorized_InvalidToken(t *testing.T) {
 	t.Parallel()
 	handler, _, db := setupLobbyTestEnv(t)
 	defer func() { _ = db.Close() }()
+	handler.authSvc = &fakeValidator{}
 
 	body := []byte(`{"player_id":"player-1","move_type":"pass","client_version":0,"payload":null}`)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/move", bytes.NewBuffer(body))
