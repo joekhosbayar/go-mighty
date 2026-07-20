@@ -18,7 +18,9 @@ cat > .env <<EOF
 ECR_IMAGE=${ECR_HOST}/mighty:latest
 POSTGRES_PASSWORD=${PGPW}
 POSTGRES_CONN=postgres://postgres:${PGPW}@postgres:5432/postgres?sslmode=disable
-JWT_SECRET=$(param /mighty/jwt_secret)
+COGNITO_POOL_ID=$(param /mighty/cognito_pool_id)
+COGNITO_CLIENT_ID=$(param /mighty/cognito_client_id)
+COGNITO_REGION=us-east-1
 REDIS_ADDR=redis:6379
 LOG_LEVEL=info
 API_DOMAIN=$(param /mighty/api_domain)

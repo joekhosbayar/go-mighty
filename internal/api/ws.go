@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/rs/zerolog/log"
 )
 
@@ -99,9 +100,14 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, err := h.authSvc.ValidateToken(authReq.Token)
+	claims, err := h.authSvc.ValidateToken(r.Context(), authReq.Token)
 	if err != nil {
-		sendError("unauthorized")
+		if errors.Is(err, service.ErrInvalidToken) {
+			sendError("unauthorized")
+		} else {
+			sendError("auth unavailable")
+		}
+
 		return
 	}
 

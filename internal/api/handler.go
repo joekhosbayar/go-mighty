@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -27,14 +28,19 @@ type GameService interface {
 	ListGamesByStatus(ctx context.Context, status game.Phase) ([]*game.Game, error)
 }
 
+// TokenValidator authenticates bearer tokens into local user claims.
+type TokenValidator interface {
+	ValidateToken(ctx context.Context, token string) (*service.AuthClaims, error)
+}
+
 // Handler handles HTTP requests for the game API.
 type Handler struct {
 	svc     GameService
-	authSvc *service.Auth
+	authSvc TokenValidator
 }
 
 // NewHandler creates a new Handler with the given services.
-func NewHandler(svc GameService, authSvc *service.Auth) *Handler {
+func NewHandler(svc GameService, authSvc TokenValidator) *Handler {
 	return &Handler{
 		svc:     svc,
 		authSvc: authSvc,
@@ -57,89 +63,31 @@ func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
 	}
 
 	if tokenString == "" {
-		return nil, errors.New("missing authentication token")
+		return nil, fmt.Errorf("%w: missing authentication token", service.ErrInvalidToken)
 	}
 
-	return h.authSvc.ValidateToken(tokenString)
+	return h.authSvc.ValidateToken(r.Context(), tokenString)
 }
 
-// SignupHandler - POST /auth/signup.
-func (h *Handler) SignupHandler(w http.ResponseWriter, r *http.Request) {
-	type Request struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Email    string `json:"email"`
-	}
-
-	var req Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+// writeAuthError maps an authenticate() error to the appropriate HTTP
+// response: token problems (including a missing/malformed Authorization
+// header) stay 401, while any other failure (JWKS fetch, store upsert, etc.)
+// is treated as an infrastructure failure and reported as 503 so clients
+// don't mistake "auth backend is down" for "your token is invalid".
+func writeAuthError(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrInvalidToken) {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	user, err := h.authSvc.Signup(r.Context(), req.Username, req.Password, req.Email)
-	if err != nil {
-		if errors.Is(err, service.ErrUserAlreadyExists) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(struct {
-		ID        string    `json:"id"`
-		Username  string    `json:"username"`
-		Email     string    `json:"email"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-	}{
-		ID:        user.ID,
-		Username:  user.Username,
-		Email:     user.Email,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-	})
-}
-
-// LoginHandler - POST /auth/login.
-func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
-	type Request struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-
-	var req Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	token, err := h.authSvc.Login(r.Context(), req.Username, req.Password)
-	if err != nil {
-		if errors.Is(err, service.ErrInvalidCredentials) {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
-			return
-		}
-
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
+	http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
 }
 
 // CreateGameHandler - POST /games.
 func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		writeAuthError(w, err)
 		return
 	}
 
@@ -190,7 +138,7 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		writeAuthError(w, err)
 		return
 	}
 
@@ -226,7 +174,7 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		writeAuthError(w, err)
 		return
 	}
 

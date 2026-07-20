@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/api"
+	"github.com/joekhosbayar/go-mighty/internal/infra"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	"github.com/joekhosbayar/go-mighty/internal/store/redis"
@@ -63,18 +66,35 @@ func main() {
 	svc := service.NewGame(redisStore, pgStore)
 
 	// 4. API
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		log.Fatalf("JWT_SECRET must be set")
+	cognitoPoolID := os.Getenv("COGNITO_POOL_ID")
+	cognitoClientID := os.Getenv("COGNITO_CLIENT_ID")
+
+	if cognitoPoolID == "" || cognitoClientID == "" {
+		log.Fatalf("COGNITO_POOL_ID and COGNITO_CLIENT_ID must be set")
 	}
 
-	authSvc := service.NewAuth(pgStore, jwtSecret)
+	cognitoRegion := os.Getenv("COGNITO_REGION")
+	if cognitoRegion == "" {
+		cognitoRegion = "us-east-1"
+	}
+
+	ctx := context.Background()
+	issuer := fmt.Sprintf("https://cognito-idp.%s.amazonaws.com/%s", cognitoRegion, cognitoPoolID)
+
+	fetcher, err := infra.NewCognitoAttributesFetcher(ctx, cognitoRegion, cognitoPoolID)
+	if err != nil {
+		log.Fatalf("cognito attributes fetcher: %v", err)
+	}
+
+	authSvc, err := service.NewCognitoAuth(ctx, pgStore, fetcher, issuer, cognitoClientID)
+	if err != nil {
+		log.Fatalf("cognito auth: %v", err)
+	}
+
 	handler := api.NewHandler(svc, authSvc)
 
 	// 5. Router
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /auth/signup", handler.SignupHandler)
-	mux.HandleFunc("POST /auth/login", handler.LoginHandler)
 	mux.HandleFunc("GET /games", handler.ListGamesHandler)
 	mux.HandleFunc("POST /games", handler.CreateGameHandler)
 	mux.HandleFunc("POST /games/{id}/join", handler.JoinGameHandler)

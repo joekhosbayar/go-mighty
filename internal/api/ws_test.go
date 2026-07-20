@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
-	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -113,7 +113,7 @@ func setupWSTestHandler(t *testing.T) (*Handler, func()) {
 		redisClient:   client,
 		processMoveCh: make(chan struct{}, 1),
 	}
-	authSvc := service.NewAuth(&postgres.Store{}, "testsecret")
+	authSvc := &fakeValidator{claims: &service.AuthClaims{UserID: "user-1", Username: "alice"}}
 	handler := NewHandler(svc, authSvc)
 
 	cleanup := func() {
@@ -220,6 +220,29 @@ func dialWS(t *testing.T, server *httptest.Server, path, token string) *websocke
 	}
 
 	return &websocketConn{Conn: conn}
+}
+
+// TestWSHandler_AuthServiceUnavailable confirms that when ValidateToken fails
+// for an infrastructure reason (not a bad token), the WebSocket AUTH path
+// reports "auth unavailable" rather than "unauthorized".
+func TestWSHandler_AuthServiceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	handler, cleanup := setupWSTestHandler(t)
+	t.Cleanup(cleanup)
+	handler.authSvc = &errValidator{err: errors.New("jwks down")}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/games/{id}/ws", handler.WSHandler)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	conn := dialWS(t, server, "/games/game-1/ws", "some-token")
+
+	msg := conn.ReadText(t)
+	if msg.Type != WSMessageTypeError || !strings.Contains(msg.Error, "auth unavailable") {
+		t.Fatalf("unexpected ws error response: %+v", msg)
+	}
 }
 
 func TestWSHandler_InvalidJSONReturnsErrorFrame(t *testing.T) {
