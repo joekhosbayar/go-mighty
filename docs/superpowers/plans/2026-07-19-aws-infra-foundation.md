@@ -992,7 +992,7 @@ resource "aws_iam_role_policy_attachment" "dlm" {
 }
 
 resource "aws_dlm_lifecycle_policy" "nightly" {
-  description        = "Nightly snapshots of mighty data volume, 7-day retention"
+  description        = "Nightly snapshots of mighty data volume - 7-day retention"
   execution_role_arn = aws_iam_role.dlm.arn
   state              = "ENABLED"
 
