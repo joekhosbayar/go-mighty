@@ -29,7 +29,7 @@ services:
         condition: service_started
 
   migrate:
-    image: migrate/migrate:4
+    image: migrate/migrate:v4.19.1
     volumes:
       - ./migrations:/migrations:ro
     command: ["-path=/migrations", "-database", "${POSTGRES_CONN}", "up"]
