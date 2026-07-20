@@ -5,9 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -31,6 +33,15 @@ func (f *fakeValidator) ValidateToken(_ context.Context, token string) (*service
 	}
 
 	return f.claims, nil
+}
+
+// errValidator is a TokenValidator test double that always fails with a
+// plain (non-ErrInvalidToken) error, simulating infrastructure failures such
+// as a JWKS fetch or store upsert error rather than a bad token.
+type errValidator struct{ err error }
+
+func (f *errValidator) ValidateToken(_ context.Context, _ string) (*service.AuthClaims, error) {
+	return nil, f.err
 }
 
 const (
@@ -272,6 +283,29 @@ func TestJoinGameHandler_GameFull(t *testing.T) {
 
 	if rec.Code != http.StatusConflict {
 		t.Errorf("expected status %d, got %d. Body: %s", http.StatusConflict, rec.Code, rec.Body.String())
+	}
+}
+
+func TestJoinGameHandler_AuthServiceUnavailable_503(t *testing.T) {
+	t.Parallel()
+	handler, _, db := setupLobbyTestEnv(t)
+	defer func() { _ = db.Close() }()
+	handler.authSvc = &errValidator{err: errors.New("jwks down")}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/games/"+testGameID+"/join", nil)
+	req.Header.Set("Authorization", "Bearer sometoken")
+	req.SetPathValue("id", testGameID)
+
+	rec := httptest.NewRecorder()
+
+	handler.JoinGameHandler(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d, got %d. Body: %s", http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	}
+
+	if !strings.Contains(rec.Body.String(), "authentication unavailable") {
+		t.Errorf("expected body to contain %q, got %q", "authentication unavailable", rec.Body.String())
 	}
 }
 

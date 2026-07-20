@@ -62,9 +62,23 @@ type cognitoUserResult struct {
 	} `json:"UserAttributes"`
 }
 
+// cognitoRegion is the AWS region used for every `aws cognito-idp` call this
+// suite makes. It's read once from E2E_COGNITO_REGION, defaulting to
+// "us-east-1" when unset.
+var cognitoRegion = func() string {
+	if r := os.Getenv("E2E_COGNITO_REGION"); r != "" {
+		return r
+	}
+
+	return "us-east-1"
+}()
+
 // runAWSCLI shells out to the `aws` CLI and returns stdout, wrapping stderr
-// into the error on failure so test output stays legible.
+// into the error on failure so test output stays legible. It injects
+// --region centrally so every call site gets it without repeating itself.
 func runAWSCLI(ctx context.Context, args ...string) ([]byte, error) {
+	args = append(args, "--region", cognitoRegion)
+
 	cmd := exec.CommandContext(ctx, "aws", args...)
 
 	out, err := cmd.Output()

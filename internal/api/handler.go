@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -62,17 +63,31 @@ func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
 	}
 
 	if tokenString == "" {
-		return nil, errors.New("missing authentication token")
+		return nil, fmt.Errorf("%w: missing authentication token", service.ErrInvalidToken)
 	}
 
 	return h.authSvc.ValidateToken(r.Context(), tokenString)
+}
+
+// writeAuthError maps an authenticate() error to the appropriate HTTP
+// response: token problems (including a missing/malformed Authorization
+// header) stay 401, while any other failure (JWKS fetch, store upsert, etc.)
+// is treated as an infrastructure failure and reported as 503 so clients
+// don't mistake "auth backend is down" for "your token is invalid".
+func writeAuthError(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrInvalidToken) {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
 }
 
 // CreateGameHandler - POST /games.
 func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		writeAuthError(w, err)
 		return
 	}
 
@@ -123,7 +138,7 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		writeAuthError(w, err)
 		return
 	}
 
@@ -159,7 +174,7 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		writeAuthError(w, err)
 		return
 	}
 
