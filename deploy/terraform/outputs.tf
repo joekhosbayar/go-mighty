@@ -17,3 +17,11 @@ output "instance_id" {
 output "public_ip" {
   value = aws_eip.api.public_ip
 }
+
+output "cognito_pool_id" {
+  value = aws_cognito_user_pool.main.id
+}
+
+output "cognito_client_id" {
+  value = aws_cognito_user_pool_client.spa.id
+}
