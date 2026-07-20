@@ -305,6 +305,51 @@ func TestValidateToken_UnknownSigningKey(t *testing.T) {
 	}
 }
 
+// 8b. valid iss/client_id/token_use/sub but NO expiration claim -> error
+// (defense-in-depth: an absent exp must not be treated as "never expires")
+func TestValidateToken_MissingExpiration(t *testing.T) {
+	server, priv := newJWKSServer(t)
+	sub := "sub-no-exp"
+
+	privJWK, err := jwk.FromRaw(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := privJWK.Set(jwk.KeyIDKey, "test-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := privJWK.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
+		t.Fatal(err)
+	}
+
+	tok, err := jwt.NewBuilder().
+		Issuer(server.URL).
+		Subject(sub).
+		Claim("client_id", testClientID).
+		Claim("token_use", "access").
+		Claim("username", sub).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, privJWK))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store := &fakeStore{}
+	auth := newTestAuth(t, server.URL, store, &fakeFetcher{name: "alice"})
+
+	_, err = auth.ValidateToken(context.Background(), string(signed))
+	if err == nil {
+		t.Fatal("expected error for token missing exp claim")
+	}
+	if store.called {
+		t.Fatal("store must not be called on validation failure")
+	}
+}
+
 // 8. garbage string -> error
 func TestValidateToken_GarbageString(t *testing.T) {
 	server, _ := newJWKSServer(t)

@@ -84,6 +84,7 @@ func (a *CognitoAuth) ValidateToken(ctx context.Context, tokenString string) (*A
 	tok, err := jwt.Parse([]byte(tokenString),
 		jwt.WithKeySet(keySet),
 		jwt.WithValidate(true),
+		jwt.WithRequiredClaim("exp"),
 		jwt.WithIssuer(a.issuer),
 		jwt.WithClaimValue("client_id", a.clientID),
 		jwt.WithClaimValue("token_use", "access"),
