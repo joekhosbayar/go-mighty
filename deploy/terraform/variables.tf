@@ -21,3 +21,9 @@ variable "instance_type" {
 locals {
   api_domain = "api.${var.domain}"
 }
+
+variable "github_token" {
+  type        = string
+  description = "GitHub Personal Access Token for Amplify Hosting"
+  sensitive   = true
+}
