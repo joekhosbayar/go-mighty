@@ -12,51 +12,33 @@ TOKENS=()
 USER_IDS=()
 LAST_INDEX=$((${#USERS[@]} - 1))
 
+POOL_ID="${POOL_ID:?set POOL_ID (tofu output -raw cognito_pool_id)}"
+CLIENT_ID="${CLIENT_ID:?set CLIENT_ID (tofu output -raw cognito_client_id)}"
+
 echo "--- MIGHTY DEMO SCRIPT ---"
 echo "0. Registering and authenticating 5 players..."
 
 for i in "${!USERS[@]}"; do
   USERNAME="${USERS[$i]}_$(date +%s)"
-  PASSWORD="password123"
+  PASSWORD="MightyDemo1"
   EMAIL="${USERNAME}@example.com"
-  
-  # Register
-  echo "Registering ${USERNAME}..."
-  REG_RES=$(curl -sS --fail-with-body -X POST "${BASE_URL}/auth/signup" \
-    -H "Content-Type: application/json" \
-    -d "{\"username\":\"${USERNAME}\", \"password\":\"${PASSWORD}\", \"email\":\"${EMAIL}\"}")
 
-  if ! echo "$REG_RES" | jq . >/dev/null 2>&1; then
-    echo "Signup returned invalid JSON for ${USERNAME}:"
-    echo "$REG_RES"
-    exit 1
-  fi
+  echo "Creating Cognito user ${USERNAME}..."
+  aws cognito-idp admin-create-user --region us-east-1 --user-pool-id "$POOL_ID" \
+    --username "$EMAIL" --message-action SUPPRESS \
+    --user-attributes Name=email,Value="$EMAIL" Name=email_verified,Value=true Name=preferred_username,Value="$USERNAME" >/dev/null
+  aws cognito-idp admin-set-user-password --region us-east-1 --user-pool-id "$POOL_ID" \
+    --username "$EMAIL" --password "$PASSWORD" --permanent
 
-  if ! USER_ID=$(jq -er '.id' <<< "$REG_RES"); then
-    echo "Signup failed to return a valid user id for ${USERNAME}:"
-    echo "$REG_RES"
-    exit 1
-  fi
-  USER_IDS+=("$USER_ID")
-
-  # Login
-  echo "Logging in ${USERNAME}..."
-  LOGIN_RES=$(curl -sS --fail-with-body -X POST "${BASE_URL}/auth/login" \
-    -H "Content-Type: application/json" \
-    -d "{\"username\":\"${USERNAME}\", \"password\":\"${PASSWORD}\"}")
-
-  if ! echo "$LOGIN_RES" | jq . >/dev/null 2>&1; then
-    echo "Login returned invalid JSON for ${USERNAME}:"
-    echo "$LOGIN_RES"
-    exit 1
-  fi
-
-  if ! TOKEN=$(jq -er '.token' <<< "$LOGIN_RES"); then
-    echo "Login failed to return a valid token for ${USERNAME}:"
-    echo "$LOGIN_RES"
-    exit 1
-  fi
+  TOKEN=$(aws cognito-idp admin-initiate-auth --region us-east-1 --user-pool-id "$POOL_ID" \
+    --client-id "$CLIENT_ID" --auth-flow ADMIN_USER_PASSWORD_AUTH \
+    --auth-parameters USERNAME="$EMAIL",PASSWORD="$PASSWORD" \
+    --query 'AuthenticationResult.AccessToken' --output text)
   TOKENS+=("$TOKEN")
+
+  USER_ID=$(aws cognito-idp admin-get-user --region us-east-1 --user-pool-id "$POOL_ID" \
+    --username "$EMAIL" --query "UserAttributes[?Name=='sub'].Value" --output text)
+  USER_IDS+=("$USER_ID")
 done
 
 echo -e "\n1. Player 0 (Alice) Creating Game..."
