@@ -1,6 +1,6 @@
 resource "aws_amplify_app" "frontend" {
   name       = "mighty-frontend"
-  repository = "https://github.com/joekhosbayar/mighty"
+  repository = "https://github.com/joekhosbayar/mighty-frontend"
 
   # The GitHub token is required for Amplify to set up webhooks and pull code
   access_token = var.github_token
