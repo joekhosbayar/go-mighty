@@ -2,7 +2,8 @@
 ############################
 # 1) Build stage
 ############################
-FROM golang:1.25 AS build
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -14,7 +15,7 @@ RUN go mod download
 COPY . .
 
 # Build a static binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o mighty ./cmd/server
 
 
