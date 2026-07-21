@@ -1,10 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -111,5 +113,45 @@ func TestWSHandlerClosesConnectionOnOversizedFrame(t *testing.T) {
 
 	if _, _, err := conn.Conn.ReadMessage(); err == nil {
 		t.Fatal("expected the connection to be closed after an oversized frame")
+	}
+}
+
+func TestWSHandlerClosesConnectionOnMessageFlood(t *testing.T) {
+	t.Parallel()
+
+	handler, cleanup := setupWSTestHandler(t)
+	t.Cleanup(cleanup)
+	WithWSMessageRate(2, 2)(handler)
+
+	server := serveWS(t, handler)
+	conn := dialWS(t, server, "/games/game-1/ws", generateValidToken("user-1", "alice"))
+
+	// Burst 2 means the third immediate move is over budget.
+	for range 5 {
+		_ = conn.WriteJSON(map[string]any{
+			keyType:          WSMessageTypeMove,
+			keyMoveType:      "pass",
+			"payload":        nil,
+			"client_version": 1,
+		})
+	}
+
+	_ = conn.Conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	var closeErr *websocket.CloseError
+
+	for {
+		_, _, err := conn.Conn.ReadMessage()
+		if err != nil {
+			if !errors.As(err, &closeErr) {
+				t.Fatalf("expected a websocket close error, got %v", err)
+			}
+
+			break
+		}
+	}
+
+	if closeErr.Code != websocket.ClosePolicyViolation {
+		t.Fatalf("expected close code %d, got %d", websocket.ClosePolicyViolation, closeErr.Code)
 	}
 }

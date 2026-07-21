@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/rs/zerolog/log"
 )
@@ -66,6 +67,18 @@ func (h *Handler) checkOrigin(r *http.Request) bool {
 
 func (h *Handler) upgrader() websocket.Upgrader {
 	return websocket.Upgrader{CheckOrigin: h.checkOrigin}
+}
+
+// closeWithCode tells the client exactly why the socket is going away before
+// hanging up, so a buggy client can back off rather than reconnect-loop into
+// the same wall. The write mutex is required because the write loop may be
+// mid-frame on the same connection.
+func closeWithCode(conn *websocket.Conn, code int, reason string, writeMu *sync.Mutex) {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+
+	msg := websocket.FormatCloseMessage(code, reason)
+	_ = conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(time.Second))
 }
 
 // IncomingWSMessage defines the structure of messages sent by the client over WebSocket.
@@ -195,6 +208,11 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	var msgBucket *ratelimit.Bucket
+	if h.wsMessagesPerSec > 0 && h.wsMessageBurst > 0 {
+		msgBucket = ratelimit.NewBucket(h.wsMessageBurst, h.wsMessagesPerSec, time.Now())
+	}
+
 	// Read loop
 	for {
 		_, message, err := conn.ReadMessage()
@@ -207,6 +225,16 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		_ = conn.SetReadDeadline(time.Now().Add(wsIdleTimeout))
+
+		if msgBucket != nil && !msgBucket.Allow(time.Now()) {
+			log.Warn().
+				Str("game_id", gameID).
+				Str("user_id", claims.UserID).
+				Msg("WebSocket message rate exceeded, closing socket")
+			closeWithCode(conn, websocket.ClosePolicyViolation, "rate limit exceeded", &wsWriteMu)
+
+			break
+		}
 
 		var inMsg IncomingWSMessage
 		if err := json.Unmarshal(message, &inMsg); err != nil {

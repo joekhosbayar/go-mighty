@@ -111,7 +111,8 @@ func main() {
 
 	handler := api.NewHandler(svc, authSvc,
 		api.WithRateLimiter(limiter),
-		api.WithAllowedOrigins(allowedOrigins))
+		api.WithAllowedOrigins(allowedOrigins),
+		api.WithWSMessageRate(10, 20))
 
 	// 5. Router
 	mux := http.NewServeMux()

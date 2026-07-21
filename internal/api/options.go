@@ -37,3 +37,13 @@ func WithAllowedOrigins(origins []string) Option {
 		h.allowedOrigins = normalized
 	}
 }
+
+// WithWSMessageRate caps inbound WebSocket messages per connection at perSec
+// messages/second with a burst of burst (spec Section 3: 10/sec, burst 20).
+// Zero or negative values disable the cap.
+func WithWSMessageRate(perSec, burst float64) Option {
+	return func(h *Handler) {
+		h.wsMessagesPerSec = perSec
+		h.wsMessageBurst = burst
+	}
+}
