@@ -58,6 +58,12 @@ end
 local elapsed = (now_ms - ts) / 1000.0
 if elapsed > 0 then
   tokens = math.min(capacity, tokens + elapsed * refill)
+else
+  -- now_ms arrived out of order (an earlier-stamped request reached Redis
+  -- after a later-stamped one). Clamp ts to its previous value instead of
+  -- writing it backward, or the next legitimate request would compute an
+  -- inflated elapsed against a too-early ts and over-credit tokens.
+  now_ms = ts
 end
 
 local allowed = 0
@@ -114,8 +120,12 @@ func (l *Limiter) Allow(ctx context.Context, key string, rule Rule) Decision {
 		return Decision{Allowed: true}
 	}
 
-	allowed, _ := res[0].(int64)
-	retryMS, _ := res[1].(int64)
+	allowed, allowedOK := res[0].(int64)
+	retryMS, retryOK := res[1].(int64)
+	if !allowedOK || !retryOK {
+		log.Warn().Str("key", key).Msg("Unexpected rate limiter reply types, allowing request")
+		return Decision{Allowed: true}
+	}
 
 	return Decision{
 		Allowed:    allowed == 1,
