@@ -29,8 +29,25 @@
 		-Server
 	}
 
+	# Matcher and header block live at the site level (not inside handle)
+	# because the `header` directive is ordered before both request_body and
+	# rate_limit. request_body (413) and rate_limit (429) short-circuit before
+	# ever reaching the handle subroute below, so CORS headers must be applied
+	# here to land on those responses too — otherwise the SPA sees an opaque
+	# fetch failure instead of a readable, CORS-visible 429/413.
+	@cors {
+		header Origin https://themighty.gg
+		header Origin https://www.themighty.gg
+	}
+
+	header @cors {
+		Access-Control-Allow-Origin "{http.request.header.Origin}"
+		Access-Control-Allow-Credentials "true"
+		Vary "Origin"
+	}
+
 	request_body {
-		max_size 64KB
+		max_size 64KiB
 	}
 
 	# Per-IP zones (spec Section 3, Layer 1). Abuse control, not DDoS
@@ -75,20 +92,20 @@
 		respond 204
 	}
 
-	@cors {
-		header Origin https://themighty.gg
-		header Origin https://www.themighty.gg
-	}
-
 	handle {
-		header @cors {
-			Access-Control-Allow-Origin "{http.request.header.Origin}"
-			Access-Control-Allow-Credentials "true"
-			Vary "Origin"
-		}
-
 		# reverse_proxy handles the WebSocket upgrade natively and appends
 		# X-Forwarded-For, which the app reads for per-IP connection caps.
-		reverse_proxy mighty:8080
+		reverse_proxy mighty:8080 {
+			# Pin this explicitly rather than relying on Caddy's default
+			# behavior. With no `trusted_proxies` configured above, Caddy
+			# discards any client-supplied X-Forwarded-For and replaces it
+			# with the real peer address — which is the only reason the
+			# app's per-IP connection cap (TRUST_PROXY_HEADERS=true, reading
+			# the first X-Forwarded-For entry) is safe from forgery. If this
+			# site is ever fronted by another proxy (CloudFront, an ALB) and
+			# `trusted_proxies` gets added, revisit this: a client could then
+			# forge X-Forwarded-For and bypass the per-IP cap entirely.
+			header_up X-Forwarded-For {remote_host}
+		}
 	}
 }
