@@ -251,9 +251,13 @@ if tokens == nil or ts == nil then
   ts = now_ms
 end
 
+-- Only advance ts when time actually moved forward. Timestamps come from the
+-- client, so concurrent requests can arrive out of stamp order; writing a
+-- backward ts would inflate the next request's elapsed and over-credit tokens.
 local elapsed = (now_ms - ts) / 1000.0
 if elapsed > 0 then
   tokens = math.min(capacity, tokens + elapsed * refill)
+  ts = now_ms
 end
 
 local allowed = 0
@@ -265,7 +269,7 @@ else
   retry_ms = math.ceil(((cost - tokens) / refill) * 1000)
 end
 
-redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', now_ms)
+redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', ts)
 redis.call('PEXPIRE', KEYS[1], math.ceil((capacity / refill) * 1000) + 1000)
 
 return {allowed, retry_ms}
@@ -310,8 +314,15 @@ func (l *Limiter) Allow(ctx context.Context, key string, rule Rule) Decision {
 		return Decision{Allowed: true}
 	}
 
-	allowed, _ := res[0].(int64)
-	retryMS, _ := res[1].(int64)
+	// Fail open on a malformed reply too — a zero-valued assertion would
+	// silently mean "denied", inverting the invariant the checks above uphold.
+	allowed, okAllowed := res[0].(int64)
+	retryMS, okRetry := res[1].(int64)
+
+	if !okAllowed || !okRetry {
+		log.Warn().Str("key", key).Msg("Unexpected rate limiter reply types, allowing request")
+		return Decision{Allowed: true}
+	}
 
 	return Decision{
 		Allowed:    allowed == 1,
