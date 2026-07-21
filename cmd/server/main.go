@@ -10,9 +10,11 @@ import (
 
 	"github.com/joekhosbayar/go-mighty/internal/api"
 	"github.com/joekhosbayar/go-mighty/internal/infra"
+	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	"github.com/joekhosbayar/go-mighty/internal/store/redis"
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 )
 
@@ -62,6 +64,14 @@ func main() {
 
 	redisStore := redis.NewStore(redisAddr)
 
+	// A separate client for the limiter: the game store's client is private
+	// to that package, and one extra small pool is cheaper than widening its
+	// API surface.
+	rlClient := goredis.NewClient(&goredis.Options{Addr: redisAddr})
+	defer func() { _ = rlClient.Close() }()
+
+	limiter := ratelimit.New(rlClient)
+
 	// 3. Service
 	svc := service.NewGame(redisStore, pgStore)
 
@@ -91,12 +101,14 @@ func main() {
 		log.Fatalf("cognito auth: %v", err)
 	}
 
-	handler := api.NewHandler(svc, authSvc)
+	handler := api.NewHandler(svc, authSvc, api.WithRateLimiter(limiter))
 
 	// 5. Router
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /games", handler.ListGamesHandler)
-	mux.HandleFunc("POST /games", handler.CreateGameHandler)
+	mux.Handle("POST /games", handler.RequireAuth(
+		handler.RateLimitByUser("creategame", ratelimit.PerHour(10))(
+			http.HandlerFunc(handler.CreateGameHandler))))
 	mux.HandleFunc("POST /games/{id}/join", handler.JoinGameHandler)
 	mux.HandleFunc("POST /games/{id}/move", handler.MoveHandler)
 	mux.HandleFunc("GET /games/{id}", handler.GetGameHandler)

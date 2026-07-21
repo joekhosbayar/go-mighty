@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
@@ -37,17 +38,33 @@ type TokenValidator interface {
 type Handler struct {
 	svc     GameService
 	authSvc TokenValidator
+	limiter *ratelimit.Limiter
 }
 
-// NewHandler creates a new Handler with the given services.
-func NewHandler(svc GameService, authSvc TokenValidator) *Handler {
-	return &Handler{
+// NewHandler creates a new Handler with the given services. Options carry the
+// production safeguards (rate limiting, origin allowlist, connection caps);
+// with none supplied the handler behaves exactly as it did before they were
+// added, which keeps local dev and the existing tests simple.
+func NewHandler(svc GameService, authSvc TokenValidator, opts ...Option) *Handler {
+	h := &Handler{
 		svc:     svc,
 		authSvc: authSvc,
 	}
+
+	for _, opt := range opts {
+		opt(h)
+	}
+
+	return h
 }
 
 func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
+	// RequireAuth already validated this request; don't pay for a second
+	// JWKS verification just because the handler still calls authenticate.
+	if claims, ok := ClaimsFromContext(r.Context()); ok {
+		return claims, nil
+	}
+
 	if h.authSvc == nil {
 		return nil, errors.New("authentication service is not configured")
 	}
