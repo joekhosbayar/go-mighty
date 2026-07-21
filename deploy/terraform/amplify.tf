@@ -13,7 +13,6 @@ resource "aws_amplify_app" "frontend" {
   }
 
   environment_variables = {
-    AMPLIFY_MONOREPO_APP_ROOT = "mighty-frontend"
     VITE_COGNITO_REGION       = "us-east-1"
     VITE_COGNITO_POOL_ID      = aws_ssm_parameter.cognito_pool_id.value
     VITE_COGNITO_CLIENT_ID    = aws_ssm_parameter.cognito_client_id.value
@@ -33,6 +32,11 @@ resource "aws_amplify_domain_association" "frontend" {
 
   sub_domain {
     branch_name = aws_amplify_branch.main.branch_name
-    prefix      = "app"
+    prefix      = ""
+  }
+
+  sub_domain {
+    branch_name = aws_amplify_branch.main.branch_name
+    prefix      = "www"
   }
 }
