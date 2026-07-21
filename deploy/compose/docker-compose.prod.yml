@@ -3,7 +3,7 @@
 # initdb.d; images are pinned/pulled, never built on the box.
 services:
   caddy:
-    image: caddy:2-alpine
+    image: ${CADDY_IMAGE}
     restart: unless-stopped
     ports:
       - "80:80"

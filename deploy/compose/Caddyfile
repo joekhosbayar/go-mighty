@@ -1,8 +1,94 @@
 {
 	email {$ACME_EMAIL}
+
+	# The rate-limit plugin has no default position in Caddy's directive
+	# order, so it must be placed explicitly or the config won't load.
+	order rate_limit before basicauth
+
+	servers {
+		timeouts {
+			# Only the header timeout is safe to set. read_body, write, and
+			# idle all apply to the hijacked connection behind a WebSocket
+			# upgrade and would drop players mid-game.
+			read_header 10s
+		}
+	}
 }
 
+# Naming the site by hostname makes Caddy provision the certificate and
+# redirect all plain HTTP to HTTPS automatically (spec Section 3, Layer 1) —
+# port 80 stays open only for that redirect and the ACME challenge.
 {$API_DOMAIN} {
 	encode gzip
-	reverse_proxy mighty:8080
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	request_body {
+		max_size 64KB
+	}
+
+	# Per-IP zones (spec Section 3, Layer 1). Abuse control, not DDoS
+	# protection: a distributed flood stays under every per-IP limit. The
+	# strict zone covers the endpoints that allocate state.
+	rate_limit {
+		zone strict {
+			match {
+				method POST
+				path /games /games/*/join
+			}
+			key {remote_host}
+			events 10
+			window 1m
+		}
+
+		zone api {
+			key {remote_host}
+			events 100
+			window 1m
+		}
+	}
+
+	# CORS preflight, answered at the edge and only for allowed origins.
+	# Different fields AND together; repeated Origin values OR together, so
+	# this matches OPTIONS from either SPA host and nothing else.
+	@preflight {
+		method OPTIONS
+		header Origin https://themighty.gg
+		header Origin https://www.themighty.gg
+	}
+
+	handle @preflight {
+		header {
+			Access-Control-Allow-Origin "{http.request.header.Origin}"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Authorization, Content-Type"
+			Access-Control-Allow-Credentials "true"
+			Access-Control-Max-Age "600"
+			Vary "Origin"
+		}
+		respond 204
+	}
+
+	@cors {
+		header Origin https://themighty.gg
+		header Origin https://www.themighty.gg
+	}
+
+	handle {
+		header @cors {
+			Access-Control-Allow-Origin "{http.request.header.Origin}"
+			Access-Control-Allow-Credentials "true"
+			Vary "Origin"
+		}
+
+		# reverse_proxy handles the WebSocket upgrade natively and appends
+		# X-Forwarded-For, which the app reads for per-IP connection caps.
+		reverse_proxy mighty:8080
+	}
 }
