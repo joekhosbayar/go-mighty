@@ -123,7 +123,19 @@ func main() {
 
 	log.Printf("Server starting on port %s", port)
 
-	if err := http.ListenAndServe(":"+port, api.LoggingMiddleware(mux)); err != nil {
+	// ReadTimeout and WriteTimeout are deliberately unset: both apply to
+	// hijacked connections and would kill long-lived WebSockets mid-game.
+	// ReadHeaderTimeout is the safe one — it bounds slowloris-style header
+	// stalls without touching an established socket.
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           api.LoggingMiddleware(api.BodyLimitMiddleware(mux)),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 16,
+	}
+
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
