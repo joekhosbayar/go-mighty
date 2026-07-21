@@ -47,3 +47,17 @@ func WithWSMessageRate(perSec, burst float64) Option {
 		h.wsMessageBurst = burst
 	}
 }
+
+// WithConnLimits caps concurrent WebSocket connections per user and per
+// source IP (spec Section 3: ~3/user, ~20/IP). Zero disables a dimension.
+func WithConnLimits(perUser, perIP int) Option {
+	return func(h *Handler) { h.conns = newConnRegistry(perUser, perIP) }
+}
+
+// WithTrustedProxy makes the handler read the client address from
+// X-Forwarded-For. Enable it only where an ingress proxy is the sole possible
+// source of traffic — otherwise callers can forge their own IP and sidestep
+// per-IP caps.
+func WithTrustedProxy(trust bool) Option {
+	return func(h *Handler) { h.trustProxy = trust }
+}

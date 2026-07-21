@@ -155,6 +155,22 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.conns != nil {
+		release, connErr := h.conns.acquire(claims.UserID, ClientIP(r, h.trustProxy))
+		if connErr != nil {
+			log.Warn().
+				Str("game_id", gameID).
+				Str("user_id", claims.UserID).
+				Err(connErr).
+				Msg("Rejected websocket: connection cap reached")
+			closeWithCode(conn, websocket.CloseTryAgainLater, connErr.Error(), &wsWriteMu)
+
+			return
+		}
+
+		defer release()
+	}
+
 	// 2. Swap the auth deadline for a rolling idle deadline. A pong or any
 	// inbound message refreshes it; a silent socket is reaped after
 	// wsIdleTimeout instead of pinning a goroutine forever.

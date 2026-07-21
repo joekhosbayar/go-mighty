@@ -155,3 +155,40 @@ func TestWSHandlerClosesConnectionOnMessageFlood(t *testing.T) {
 		t.Fatalf("expected close code %d, got %d", websocket.ClosePolicyViolation, closeErr.Code)
 	}
 }
+
+func TestWSHandlerRejectsExcessConnectionsForOneUser(t *testing.T) {
+	t.Parallel()
+
+	handler, cleanup := setupWSTestHandler(t)
+	t.Cleanup(cleanup)
+	WithConnLimits(1, 100)(handler)
+
+	server := serveWS(t, handler)
+	token := generateValidToken("user-1", "alice")
+
+	first := dialWS(t, server, "/games/game-1/ws", token)
+
+	// Keep the first socket alive; the second must be refused.
+	second := dialWS(t, server, "/games/game-1/ws", token)
+
+	_ = second.Conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	var closeErr *websocket.CloseError
+
+	for {
+		_, _, err := second.Conn.ReadMessage()
+		if err != nil {
+			if !errors.As(err, &closeErr) {
+				t.Fatalf("expected a websocket close error, got %v", err)
+			}
+
+			break
+		}
+	}
+
+	if closeErr.Code != websocket.CloseTryAgainLater {
+		t.Fatalf("expected close code %d, got %d", websocket.CloseTryAgainLater, closeErr.Code)
+	}
+
+	_ = first.Conn.Close()
+}

@@ -109,10 +109,16 @@ func main() {
 		allowedOrigins = strings.Split(raw, ",")
 	}
 
+	// Only true where an ingress proxy is the sole source of traffic — see
+	// WithTrustedProxy. Set in the prod compose .env, absent locally.
+	trustProxy := os.Getenv("TRUST_PROXY_HEADERS") == "true"
+
 	handler := api.NewHandler(svc, authSvc,
 		api.WithRateLimiter(limiter),
 		api.WithAllowedOrigins(allowedOrigins),
-		api.WithWSMessageRate(10, 20))
+		api.WithWSMessageRate(10, 20),
+		api.WithConnLimits(3, 20),
+		api.WithTrustedProxy(trustProxy))
 
 	// 5. Router
 	mux := http.NewServeMux()

@@ -42,6 +42,8 @@ type Handler struct {
 	allowedOrigins   []string
 	wsMessagesPerSec float64
 	wsMessageBurst   float64
+	conns            *connRegistry
+	trustProxy       bool
 }
 
 // NewHandler creates a new Handler with the given services. Options carry the
