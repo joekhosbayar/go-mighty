@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/api"
@@ -101,7 +102,16 @@ func main() {
 		log.Fatalf("cognito auth: %v", err)
 	}
 
-	handler := api.NewHandler(svc, authSvc, api.WithRateLimiter(limiter))
+	// Comma-separated, e.g. "https://themighty.gg,https://www.themighty.gg".
+	// Empty in local dev, where the same-host fallback applies.
+	var allowedOrigins []string
+	if raw := os.Getenv("ALLOWED_ORIGINS"); raw != "" {
+		allowedOrigins = strings.Split(raw, ",")
+	}
+
+	handler := api.NewHandler(svc, authSvc,
+		api.WithRateLimiter(limiter),
+		api.WithAllowedOrigins(allowedOrigins))
 
 	// 5. Router
 	mux := http.NewServeMux()

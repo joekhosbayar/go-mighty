@@ -36,9 +36,10 @@ type TokenValidator interface {
 
 // Handler handles HTTP requests for the game API.
 type Handler struct {
-	svc     GameService
-	authSvc TokenValidator
-	limiter *ratelimit.Limiter
+	svc            GameService
+	authSvc        TokenValidator
+	limiter        *ratelimit.Limiter
+	allowedOrigins []string
 }
 
 // NewHandler creates a new Handler with the given services. Options carry the
