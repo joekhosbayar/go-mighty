@@ -1,2 +1,3 @@
-domain      = "example.com"
-alert_email = "you@example.com"
+domain       = "example.com"
+alert_email  = "you@example.com"
+github_token = "ghp_..."
