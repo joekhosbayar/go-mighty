@@ -61,3 +61,11 @@ func WithConnLimits(perUser, perIP int) Option {
 func WithTrustedProxy(trust bool) Option {
 	return func(h *Handler) { h.trustProxy = trust }
 }
+
+// AllowedOrigins returns the resolved, normalized origin allowlist (empty
+// means the same-host fallback is active). It exists so callers such as
+// main's startup diagnostics can log the configuration as the handler will
+// actually use it, rather than re-deriving the normalization independently.
+func (h *Handler) AllowedOrigins() []string {
+	return h.allowedOrigins
+}

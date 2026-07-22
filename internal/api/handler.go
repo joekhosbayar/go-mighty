@@ -361,12 +361,20 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // LoggingMiddleware logs the incoming HTTP requests and their responses.
-func LoggingMiddleware(next http.Handler) http.Handler {
+//
+// It is a Handler method (rather than a package-level function) so it can
+// resolve the real client via ClientIP(r, h.trustProxy) instead of logging
+// req.RemoteAddr directly. Since the Caddy proxy deploy, RemoteAddr is always
+// the proxy's container address, which would otherwise attribute every access
+// log line to the proxy rather than the caller.
+func (h *Handler) LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		remote := ClientIP(req, h.trustProxy)
+
 		log.Info().
 			Str("method", req.Method).
 			Str("url", req.URL.String()).
-			Str("remote", req.RemoteAddr).
+			Str("remote", remote).
 			Msg("Incoming request")
 
 		lrw := &LoggingResponseWriter{ResponseWriter: w}
@@ -400,7 +408,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		event.
 			Str("method", req.Method).
 			Str("url", req.URL.String()).
-			Str("remote", req.RemoteAddr).
+			Str("remote", remote).
 			Int("responseCode", statusCode).
 			Dur("duration", time.Since(start)).
 			Msg(msg)
