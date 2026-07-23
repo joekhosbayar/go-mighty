@@ -36,8 +36,7 @@
 	# here to land on those responses too — otherwise the SPA sees an opaque
 	# fetch failure instead of a readable, CORS-visible 429/413.
 	@cors {
-		header Origin https://themighty.gg
-		header Origin https://www.themighty.gg
+		header Origin https://themighty.gg https://www.themighty.gg
 	}
 
 	header @cors {
@@ -76,8 +75,7 @@
 	# this matches OPTIONS from either SPA host and nothing else.
 	@preflight {
 		method OPTIONS
-		header Origin https://themighty.gg
-		header Origin https://www.themighty.gg
+		header Origin https://themighty.gg https://www.themighty.gg
 	}
 
 	handle @preflight {
