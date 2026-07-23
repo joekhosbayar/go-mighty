@@ -6,16 +6,24 @@ import (
 	"testing"
 	"time"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	redisstore "github.com/joekhosbayar/go-mighty/internal/store/redis"
 	"github.com/redis/go-redis/v9"
 )
 
+type publishedEvent struct {
+	channel string
+	payload any
+}
+
 type fakeRedisStore struct {
-	game       *game.Game
-	saved      bool
-	savedWith  int64
-	acquireErr error
+	game            *game.Game
+	saved           bool
+	savedWith       int64
+	acquireErr      error
+	publishedEvents []publishedEvent
 }
 
 func (f *fakeRedisStore) SaveGame(_ context.Context, g *game.Game, expectedVersion int64) error {
@@ -42,7 +50,11 @@ func (f *fakeRedisStore) ReleaseLock(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (f *fakeRedisStore) PublishEvent(_ context.Context, _ string, _ any) error {
+func (f *fakeRedisStore) PublishEvent(_ context.Context, channel string, payload any) error {
+	f.publishedEvents = append(f.publishedEvents, publishedEvent{
+		channel: channel,
+		payload: payload,
+	})
 	return nil
 }
 
@@ -142,5 +154,97 @@ func TestJoinGameSavesWithLoadedVersionAsCASExpectation(t *testing.T) {
 
 	if store.savedWith != 7 {
 		t.Fatalf("expected CAS expectation 7 (pre-bump version), got %d", store.savedWith)
+	}
+}
+
+func TestCreateGamePublishesLobbyEvent(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestServiceWithConfig(t)
+	fakeStore := &fakeRedisStore{}
+	svc.redisStore = fakeStore
+
+	cfg := game.GameConfig{NumPlayers: 5}
+	g, err := svc.CreateGame(t.Context(), "game-create-lobby", cfg)
+	if err != nil {
+		t.Fatalf("CreateGame failed: %v", err)
+	}
+
+	foundLobbyEvent := false
+	for _, evt := range fakeStore.publishedEvents {
+		if evt.channel == "lobby_events" {
+			m, ok := evt.payload.(map[string]any)
+			if ok && m["type"] == "game_created" && m["game"] == g {
+				foundLobbyEvent = true
+				break
+			}
+		}
+	}
+
+	if !foundLobbyEvent {
+		t.Fatalf("expected lobby_events game_created event to be published, got events: %+v", fakeStore.publishedEvents)
+	}
+}
+
+func TestJoinGamePublishesLobbyEvent(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectExec(`INSERT INTO moves`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	g := game.New("game-join-lobby")
+	g.Players[0] = &game.Player{ID: "p1", Name: "Player 1", Seat: 0, IsConnected: true}
+
+	fakeStore := &fakeRedisStore{game: g}
+	svc := &Game{
+		redisStore:    fakeStore,
+		postgresStore: postgres.NewStoreWithDB(db),
+	}
+
+	_, err = svc.JoinGame(t.Context(), "game-join-lobby", "p2", "Player 2")
+	if err != nil {
+		t.Fatalf("JoinGame failed: %v", err)
+	}
+
+	var lobbyEvent map[string]any
+	var gameEvent map[string]any
+
+	for _, evt := range fakeStore.publishedEvents {
+		if evt.channel == "lobby_events" {
+			if m, ok := evt.payload.(map[string]any); ok {
+				lobbyEvent = m
+			}
+		}
+		if evt.channel == "game-join-lobby" {
+			if m, ok := evt.payload.(map[string]any); ok {
+				gameEvent = m
+			}
+		}
+	}
+
+	if gameEvent == nil || gameEvent["type"] != "player_joined" {
+		t.Fatalf("expected player_joined event on game channel, got %+v", gameEvent)
+	}
+
+	if lobbyEvent == nil || lobbyEvent["type"] != "game_joined" {
+		t.Fatalf("expected game_joined event on lobby_events channel, got %+v", lobbyEvent)
+	}
+
+	if lobbyEvent["game_id"] != "game-join-lobby" {
+		t.Errorf("expected game_id game-join-lobby, got %v", lobbyEvent["game_id"])
+	}
+
+	if lobbyEvent["players_seated"] != 2 {
+		t.Errorf("expected players_seated 2, got %v", lobbyEvent["players_seated"])
+	}
+
+	if lobbyEvent["max_players"] != 5 {
+		t.Errorf("expected max_players 5, got %v", lobbyEvent["max_players"])
 	}
 }
