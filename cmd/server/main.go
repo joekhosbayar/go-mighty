@@ -6,14 +6,28 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/api"
 	"github.com/joekhosbayar/go-mighty/internal/infra"
+	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	"github.com/joekhosbayar/go-mighty/internal/store/redis"
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
+	zlog "github.com/rs/zerolog/log"
+)
+
+// Safeguard tunables (spec Section 3). Named here, not inlined into the
+// NewHandler call below, so the startup diagnostics log can echo the exact
+// values that were actually applied instead of a second, driftable copy.
+const (
+	wsMessagesPerSec = 10
+	wsMessageBurst   = 20
+	connsPerUser     = 3
+	connsPerIP       = 20
 )
 
 func main() {
@@ -62,6 +76,14 @@ func main() {
 
 	redisStore := redis.NewStore(redisAddr)
 
+	// A separate client for the limiter: the game store's client is private
+	// to that package, and one extra small pool is cheaper than widening its
+	// API surface.
+	rlClient := goredis.NewClient(&goredis.Options{Addr: redisAddr})
+	defer func() { _ = rlClient.Close() }()
+
+	limiter := ratelimit.New(rlClient)
+
 	// 3. Service
 	svc := service.NewGame(redisStore, pgStore)
 
@@ -91,12 +113,59 @@ func main() {
 		log.Fatalf("cognito auth: %v", err)
 	}
 
-	handler := api.NewHandler(svc, authSvc)
+	// Comma-separated, e.g. "https://themighty.gg,https://www.themighty.gg".
+	// Empty in local dev, where the same-host fallback applies.
+	var allowedOrigins []string
+	if raw := os.Getenv("ALLOWED_ORIGINS"); raw != "" {
+		allowedOrigins = strings.Split(raw, ",")
+	}
+
+	// Only true where an ingress proxy is the sole source of traffic — see
+	// WithTrustedProxy. Set in the prod compose .env, absent locally.
+	trustProxy := os.Getenv("TRUST_PROXY_HEADERS") == "true"
+
+	handler := api.NewHandler(svc, authSvc,
+		api.WithRateLimiter(limiter),
+		api.WithAllowedOrigins(allowedOrigins),
+		api.WithWSMessageRate(wsMessagesPerSec, wsMessageBurst),
+		api.WithConnLimits(connsPerUser, connsPerIP),
+		api.WithTrustedProxy(trustProxy))
+
+	// Echo the resolved safeguard configuration once at startup. Two failure
+	// modes are otherwise silent in production: a degenerate ALLOWED_ORIGINS
+	// (e.g. "," or all-whitespace) collapses to zero entries and the origin
+	// check falls back to the same-host dev behavior, which rejects every
+	// browser WebSocket; and an unset or misspelled TRUST_PROXY_HEADERS makes
+	// ClientIP return the proxy's own address for every request, turning the
+	// per-IP cap into a global connection ceiling for the whole service.
+	effectiveOrigins := handler.AllowedOrigins()
+
+	originsDescription := "same-host fallback (ALLOWED_ORIGINS empty or unset)"
+	if len(effectiveOrigins) > 0 {
+		originsDescription = strings.Join(effectiveOrigins, ",")
+	}
+
+	if os.Getenv("ALLOWED_ORIGINS") != "" && len(effectiveOrigins) == 0 {
+		zlog.Warn().
+			Str("allowed_origins_raw", os.Getenv("ALLOWED_ORIGINS")).
+			Msg("ALLOWED_ORIGINS was set but normalized to zero entries; falling back to same-host origin check, which rejects every browser WebSocket in production — this is almost certainly a deploy mistake")
+	}
+
+	zlog.Info().
+		Str("allowedOrigins", originsDescription).
+		Bool("trustProxy", trustProxy).
+		Int("connLimitPerUser", connsPerUser).
+		Int("connLimitPerIP", connsPerIP).
+		Float64("wsMessagesPerSec", wsMessagesPerSec).
+		Float64("wsMessageBurst", wsMessageBurst).
+		Msg("resolved safeguard configuration")
 
 	// 5. Router
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /games", handler.ListGamesHandler)
-	mux.HandleFunc("POST /games", handler.CreateGameHandler)
+	mux.Handle("POST /games", handler.RequireAuth(
+		handler.RateLimitByUser("creategame", ratelimit.PerHour(10))(
+			http.HandlerFunc(handler.CreateGameHandler))))
 	mux.HandleFunc("POST /games/{id}/join", handler.JoinGameHandler)
 	mux.HandleFunc("POST /games/{id}/move", handler.MoveHandler)
 	mux.HandleFunc("GET /games/{id}", handler.GetGameHandler)
@@ -111,7 +180,19 @@ func main() {
 
 	log.Printf("Server starting on port %s", port)
 
-	if err := http.ListenAndServe(":"+port, api.LoggingMiddleware(mux)); err != nil {
+	// ReadTimeout and WriteTimeout are deliberately unset: both apply to
+	// hijacked connections and would kill long-lived WebSockets mid-game.
+	// ReadHeaderTimeout is the safe one — it bounds slowloris-style header
+	// stalls without touching an established socket.
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           handler.LoggingMiddleware(api.BodyLimitMiddleware(mux)),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 16,
+	}
+
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -223,7 +223,7 @@ func TestLoggingMiddleware(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			// Create a test handler wrapped with logging middleware
-			wrapped := LoggingMiddleware(tt.handler)
+			wrapped := (&Handler{}).LoggingMiddleware(tt.handler)
 
 			// Create test request
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", nil)
@@ -269,7 +269,7 @@ func TestLoggingMiddleware_RequestDetails(t *testing.T) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	wrapped := LoggingMiddleware(handler)
+	wrapped := (&Handler{}).LoggingMiddleware(handler)
 
 	tests := []struct {
 		name   string
@@ -323,7 +323,7 @@ func TestLoggingMiddleware_PreservesHeaders(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	wrapped := LoggingMiddleware(handler)
+	wrapped := (&Handler{}).LoggingMiddleware(handler)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
 	rec := httptest.NewRecorder()
@@ -375,7 +375,7 @@ func TestLoggingMiddleware_NoWriteCalls(t *testing.T) {
 		// or do nothing
 	})
 
-	wrapped := LoggingMiddleware(handler)
+	wrapped := (&Handler{}).LoggingMiddleware(handler)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
 	rec := httptest.NewRecorder()

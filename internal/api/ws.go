@@ -6,11 +6,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/rs/zerolog/log"
 )
@@ -20,25 +22,63 @@ const (
 	WSMessageTypeError = "ERROR"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		// Allow non-browser clients that may not set Origin.
-		if origin == "" {
-			return true
-		}
+const (
+	// maxWSMessageBytes caps a single inbound frame. The largest legitimate
+	// client message is a move of a few hundred bytes; 32KB is generous
+	// headroom that still makes memory exhaustion via one socket impossible.
+	maxWSMessageBytes int64 = 32 << 10
 
+	// wsIdleTimeout drops a socket that has sent neither a message nor a pong
+	// within this window. The write loop pings every 30s, so a healthy client
+	// refreshes the deadline twice per window.
+	wsIdleTimeout = 60 * time.Second
+)
+
+// checkOrigin enforces the configured origin allowlist for WebSocket
+// upgrades. Browsers always send Origin; native clients (Electron/Swift) may
+// not, and those are gated by the AUTH token instead.
+func (h *Handler) checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+
+	if len(h.allowedOrigins) == 0 {
+		// Dev default: same-host only, matching the pre-allowlist behaviour.
 		u, err := url.Parse(origin)
 		if err != nil {
 			return false
 		}
 
-		// Only allow requests from the same host.
-		// Note: This doesn't validate scheme (http vs https) or port to allow
-		// flexible development environments. For production, consider using
-		// environment-specific allowlists of trusted origins.
 		return u.Host == r.Host
-	},
+	}
+
+	candidate := strings.ToLower(strings.TrimSuffix(origin, "/"))
+	for _, allowed := range h.allowedOrigins {
+		if candidate == allowed {
+			return true
+		}
+	}
+
+	log.Warn().Str("origin", origin).Msg("Rejected websocket upgrade from disallowed origin")
+
+	return false
+}
+
+func (h *Handler) upgrader() websocket.Upgrader {
+	return websocket.Upgrader{CheckOrigin: h.checkOrigin}
+}
+
+// closeWithCode tells the client exactly why the socket is going away before
+// hanging up, so a buggy client can back off rather than reconnect-loop into
+// the same wall. The write mutex is required because the write loop may be
+// mid-frame on the same connection.
+func closeWithCode(conn *websocket.Conn, code int, reason string, writeMu *sync.Mutex) {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+
+	msg := websocket.FormatCloseMessage(code, reason)
+	_ = conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(time.Second))
 }
 
 // IncomingWSMessage defines the structure of messages sent by the client over WebSocket.
@@ -59,12 +99,16 @@ type OutgoingWSError struct {
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	up := h.upgrader()
+
+	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
 		return
 	}
 	defer func() { _ = conn.Close() }()
+
+	conn.SetReadLimit(maxWSMessageBytes)
 
 	var wsWriteMu sync.Mutex
 
@@ -111,8 +155,29 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Reset deadline after successful auth
-	_ = conn.SetReadDeadline(time.Time{})
+	if h.conns != nil {
+		release, connErr := h.conns.acquire(claims.UserID, ClientIP(r, h.trustProxy))
+		if connErr != nil {
+			log.Warn().
+				Str("game_id", gameID).
+				Str("user_id", claims.UserID).
+				Err(connErr).
+				Msg("Rejected websocket: connection cap reached")
+			closeWithCode(conn, websocket.CloseTryAgainLater, connErr.Error(), &wsWriteMu)
+
+			return
+		}
+
+		defer release()
+	}
+
+	// 2. Swap the auth deadline for a rolling idle deadline. A pong or any
+	// inbound message refreshes it; a silent socket is reaped after
+	// wsIdleTimeout instead of pinning a goroutine forever.
+	_ = conn.SetReadDeadline(time.Now().Add(wsIdleTimeout))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(wsIdleTimeout))
+	})
 
 	pubsub := h.svc.Subscribe(r.Context(), gameID)
 	if pubsub == nil {
@@ -159,6 +224,11 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	var msgBucket *ratelimit.Bucket
+	if h.wsMessagesPerSec > 0 && h.wsMessageBurst > 0 {
+		msgBucket = ratelimit.NewBucket(h.wsMessageBurst, h.wsMessagesPerSec, time.Now())
+	}
+
 	// Read loop
 	for {
 		_, message, err := conn.ReadMessage()
@@ -166,6 +236,18 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Error().Str("game_id", gameID).Str("user_id", claims.UserID).Err(err).Msg("WebSocket read error")
 			}
+
+			break
+		}
+
+		_ = conn.SetReadDeadline(time.Now().Add(wsIdleTimeout))
+
+		if msgBucket != nil && !msgBucket.Allow(time.Now()) {
+			log.Warn().
+				Str("game_id", gameID).
+				Str("user_id", claims.UserID).
+				Msg("WebSocket message rate exceeded, closing socket")
+			closeWithCode(conn, websocket.ClosePolicyViolation, "rate limit exceeded", &wsWriteMu)
 
 			break
 		}

@@ -25,3 +25,7 @@ output "cognito_pool_id" {
 output "cognito_client_id" {
   value = aws_cognito_user_pool_client.spa.id
 }
+
+output "caddy_ecr_repo_url" {
+  value = aws_ecr_repository.caddy.repository_url
+}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
@@ -35,19 +36,40 @@ type TokenValidator interface {
 
 // Handler handles HTTP requests for the game API.
 type Handler struct {
-	svc     GameService
-	authSvc TokenValidator
+	svc              GameService
+	authSvc          TokenValidator
+	limiter          *ratelimit.Limiter
+	allowedOrigins   []string
+	wsMessagesPerSec float64
+	wsMessageBurst   float64
+	conns            *connRegistry
+	trustProxy       bool
 }
 
-// NewHandler creates a new Handler with the given services.
-func NewHandler(svc GameService, authSvc TokenValidator) *Handler {
-	return &Handler{
+// NewHandler creates a new Handler with the given services. Options carry the
+// production safeguards (rate limiting, origin allowlist, connection caps);
+// with none supplied the handler behaves exactly as it did before they were
+// added, which keeps local dev and the existing tests simple.
+func NewHandler(svc GameService, authSvc TokenValidator, opts ...Option) *Handler {
+	h := &Handler{
 		svc:     svc,
 		authSvc: authSvc,
 	}
+
+	for _, opt := range opts {
+		opt(h)
+	}
+
+	return h
 }
 
 func (h *Handler) authenticate(r *http.Request) (*service.AuthClaims, error) {
+	// RequireAuth already validated this request; don't pay for a second
+	// JWKS verification just because the handler still calls authenticate.
+	if claims, ok := ClaimsFromContext(r.Context()); ok {
+		return claims, nil
+	}
+
 	if h.authSvc == nil {
 		return nil, errors.New("authentication service is not configured")
 	}
@@ -339,12 +361,20 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // LoggingMiddleware logs the incoming HTTP requests and their responses.
-func LoggingMiddleware(next http.Handler) http.Handler {
+//
+// It is a Handler method (rather than a package-level function) so it can
+// resolve the real client via ClientIP(r, h.trustProxy) instead of logging
+// req.RemoteAddr directly. Since the Caddy proxy deploy, RemoteAddr is always
+// the proxy's container address, which would otherwise attribute every access
+// log line to the proxy rather than the caller.
+func (h *Handler) LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		remote := ClientIP(req, h.trustProxy)
+
 		log.Info().
 			Str("method", req.Method).
 			Str("url", req.URL.String()).
-			Str("remote", req.RemoteAddr).
+			Str("remote", remote).
 			Msg("Incoming request")
 
 		lrw := &LoggingResponseWriter{ResponseWriter: w}
@@ -378,7 +408,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		event.
 			Str("method", req.Method).
 			Str("url", req.URL.String()).
-			Str("remote", req.RemoteAddr).
+			Str("remote", remote).
 			Int("responseCode", statusCode).
 			Dur("duration", time.Since(start)).
 			Msg(msg)

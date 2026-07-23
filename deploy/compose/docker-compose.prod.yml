@@ -3,7 +3,7 @@
 # initdb.d; images are pinned/pulled, never built on the box.
 services:
   caddy:
-    image: caddy:2-alpine
+    image: ${CADDY_IMAGE}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -17,6 +17,11 @@ services:
       - caddy_config:/config
     depends_on:
       - mighty
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   mighty:
     image: ${ECR_IMAGE}
@@ -27,6 +32,11 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_started
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   migrate:
     image: migrate/migrate:v4.19.1

@@ -110,7 +110,7 @@ Defense in layers:
 - **Layer 0.5 — Cognito (auth abuse):** login/signup/reset/OTP throttling and lockout are managed by Cognito; credential-stuffing never reaches our infrastructure.
 - **Layer 1 — Caddy edge (per-IP, HTTP):** Caddy built with the rate-limit plugin via `xcaddy` (small custom Dockerfile).
   - General API zone ~100 req/min/IP → 429; strict zone ~10 req/min/IP on expensive endpoints (game creation, matchmaking).
-  - Hygiene: body size cap (64KB), header/idle timeouts, HTTP→HTTPS redirect, security headers (HSTS, nosniff, frame-deny), CORS locked to `https://app.<domain>`.
+  - Hygiene: body size cap (64KB), header/idle timeouts, HTTP→HTTPS redirect, security headers (HSTS, nosniff, frame-deny), CORS locked to `https://themighty.gg`.
 - **Layer 2 — Go middleware (per-user/per-action):** token buckets in Redis keyed on Cognito `sub`.
   - Game creation ~10/hour/user.
   - WebSocket message cap ~10 msgs/sec (burst 20) per connection; violation drops the socket with a close code.

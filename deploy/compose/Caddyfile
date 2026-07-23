@@ -1,8 +1,109 @@
 {
 	email {$ACME_EMAIL}
+
+	# The rate-limit plugin has no default position in Caddy's directive
+	# order, so it must be placed explicitly or the config won't load.
+	order rate_limit before basicauth
+
+	servers {
+		timeouts {
+			# Only the header timeout is safe to set. read_body, write, and
+			# idle all apply to the hijacked connection behind a WebSocket
+			# upgrade and would drop players mid-game.
+			read_header 10s
+		}
+	}
 }
 
+# Naming the site by hostname makes Caddy provision the certificate and
+# redirect all plain HTTP to HTTPS automatically (spec Section 3, Layer 1) —
+# port 80 stays open only for that redirect and the ACME challenge.
 {$API_DOMAIN} {
 	encode gzip
-	reverse_proxy mighty:8080
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Matcher and header block live at the site level (not inside handle)
+	# because the `header` directive is ordered before both request_body and
+	# rate_limit. request_body (413) and rate_limit (429) short-circuit before
+	# ever reaching the handle subroute below, so CORS headers must be applied
+	# here to land on those responses too — otherwise the SPA sees an opaque
+	# fetch failure instead of a readable, CORS-visible 429/413.
+	@cors {
+		header Origin https://themighty.gg https://www.themighty.gg
+	}
+
+	header @cors {
+		Access-Control-Allow-Origin "{http.request.header.Origin}"
+		Access-Control-Allow-Credentials "true"
+		Vary "Origin"
+	}
+
+	request_body {
+		max_size 64KiB
+	}
+
+	# Per-IP zones (spec Section 3, Layer 1). Abuse control, not DDoS
+	# protection: a distributed flood stays under every per-IP limit. The
+	# strict zone covers the endpoints that allocate state.
+	rate_limit {
+		zone strict {
+			match {
+				method POST
+				path /games /games/*/join
+			}
+			key {remote_host}
+			events 10
+			window 1m
+		}
+
+		zone api {
+			key {remote_host}
+			events 100
+			window 1m
+		}
+	}
+
+	# CORS preflight, answered at the edge and only for allowed origins.
+	# Different fields AND together; repeated Origin values OR together, so
+	# this matches OPTIONS from either SPA host and nothing else.
+	@preflight {
+		method OPTIONS
+		header Origin https://themighty.gg https://www.themighty.gg
+	}
+
+	handle @preflight {
+		header {
+			Access-Control-Allow-Origin "{http.request.header.Origin}"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Authorization, Content-Type"
+			Access-Control-Allow-Credentials "true"
+			Access-Control-Max-Age "600"
+			Vary "Origin"
+		}
+		respond 204
+	}
+
+	handle {
+		# reverse_proxy handles the WebSocket upgrade natively and appends
+		# X-Forwarded-For, which the app reads for per-IP connection caps.
+		reverse_proxy mighty:8080 {
+			# Pin this explicitly rather than relying on Caddy's default
+			# behavior. With no `trusted_proxies` configured above, Caddy
+			# discards any client-supplied X-Forwarded-For and replaces it
+			# with the real peer address — which is the only reason the
+			# app's per-IP connection cap (TRUST_PROXY_HEADERS=true, reading
+			# the first X-Forwarded-For entry) is safe from forgery. If this
+			# site is ever fronted by another proxy (CloudFront, an ALB) and
+			# `trusted_proxies` gets added, revisit this: a client could then
+			# forge X-Forwarded-For and bypass the per-IP cap entirely.
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
 }
