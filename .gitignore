@@ -12,7 +12,7 @@ secrets/*.txt
 *.dll
 *.so
 *.dylib
-server
+/server
 
 # Test binary, built with `go test -c`
 *.test

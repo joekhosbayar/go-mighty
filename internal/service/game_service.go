@@ -80,6 +80,11 @@ func (s *Game) CreateGame(ctx context.Context, id string, cfg game.GameConfig) (
 		return nil, fmt.Errorf("failed to save game in redis: %w", err)
 	}
 
+	_ = s.redisStore.PublishEvent(ctx, "lobby_events", map[string]any{
+		"type": "game_created",
+		"game": g,
+	})
+
 	return g, nil
 }
 
@@ -163,6 +168,20 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 		"type":    "player_joined",
 		"player":  g.Players[seat],
 		"version": g.Version,
+	})
+
+	seated := 0
+	for _, p := range g.Players {
+		if p != nil {
+			seated++
+		}
+	}
+
+	_ = s.redisStore.PublishEvent(ctx, "lobby_events", map[string]any{
+		"type":           "game_joined",
+		"game_id":        gameID,
+		"players_seated": seated,
+		"max_players":    g.NumSeatsPublic(),
 	})
 
 	return g, nil

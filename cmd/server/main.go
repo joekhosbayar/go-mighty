@@ -169,7 +169,8 @@ func main() {
 	mux.HandleFunc("POST /games/{id}/join", handler.JoinGameHandler)
 	mux.HandleFunc("POST /games/{id}/move", handler.MoveHandler)
 	mux.HandleFunc("GET /games/{id}", handler.GetGameHandler)
-	mux.HandleFunc("GET /games/{id}/ws", handler.WSHandler) // WebSocket
+	mux.HandleFunc("GET /games/{id}/ws", handler.WSHandler) // Existing Game WebSocket
+	mux.HandleFunc("GET /lobby/ws", handler.LobbyWSHandler) // New Lobby WebSocket
 	mux.HandleFunc("GET /healthz", api.HealthzHandler)
 
 	// 6. Server
