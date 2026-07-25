@@ -1877,7 +1877,7 @@ Every assertion below reads `got := counts("mighty.ws.handshake", "outcome")` af
 |---|---|---|
 | `TestHandshakeMetricAuthTimeout` | connect, send nothing, wait past the 5s auth deadline | `got[obs.OutcomeAuthTimeout] == 1` |
 | `TestHandshakeMetricAuthFailed` | send `{"type":"AUTH","token":"bad"}` (make `fakeValidator` return `service.ErrInvalidToken`) | `got[obs.OutcomeAuthFailed] == 1` |
-| `TestHandshakeMetricOriginRejected` | `WithAllowedOrigins([]string{"https://themighty.gg"})(handler)`, then `dialWSWithOrigin(t, server, "https://evil.example")` | `got[obs.OutcomeOriginRejected] == 1` |
+| `TestHandshakeMetricOriginRejected` | `WithAllowedOrigins([]string{"https://themighty.gg"})(handler)`, then `dialWSWithOrigin(t, server, "https://evil.example")` | `got[obs.OutcomeOriginRejected] == 1` **and `got[obs.OutcomeUpgradeFailed] == 0`** — without the second assertion the test passes against a double-counting implementation |
 | `TestHandshakeMetricConnLimitUser` | `WithConnLimits(1, 0)(handler)`, two authenticated connections for one user | `got[obs.OutcomeConnLimitUser] == 1` and `got[obs.OutcomeOK] == 1` |
 | `TestHandshakeMetricConnLimitIP` | `WithConnLimits(0, 1)(handler)`, two authenticated connections | `got[obs.OutcomeConnLimitIP] == 1` |
 | `TestHandshakeMetricOK` | one successful authenticated connection | `got[obs.OutcomeOK] == 1` |
@@ -1928,16 +1928,55 @@ func wsKindFromPath(p string) string {
 
 Then add these recordings. Every one is placed on an **existing** branch — no new control flow.
 
-In `checkOrigin`, on each `return false` path (the `url.Parse` error, the same-host mismatch, and the allowlist miss after the existing `log.Warn`):
+**Record the handshake outcome in exactly ONE place — the upgrade-error
+branch — and do NOT record inside `checkOrigin`.** `checkOrigin` stays a pure
+predicate.
+
+Do not try to distinguish the failure cause from `Upgrade`'s error value:
+gorilla's `websocket.ErrBadHandshake` lives in `client.go` and is only ever
+returned by the **client** `Dialer`. Server-side `Upgrade` returns a distinct
+`websocket.HandshakeError`, so `errors.Is(err, websocket.ErrBadHandshake)` is
+always false — a guard written that way is dead code and every origin
+rejection gets counted twice.
+
+Capture the cause where it is actually known. `Upgrade` calls `CheckOrigin`
+synchronously on the same goroutine, so an unsynchronised flag is safe:
+
 ```go
-	h.metrics.RecordHandshake(r.Context(), wsKindFromPath(r.URL.Path), obs.OutcomeOriginRejected)
+// upgraderFor reports origin rejection through originRejected, because
+// Upgrade's error value cannot distinguish the cause (see above).
+func (h *Handler) upgraderFor(originRejected *bool) websocket.Upgrader {
+	return websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			allowed := h.checkOrigin(r)
+			if !allowed {
+				*originRejected = true
+			}
+
+			return allowed
+		},
+	}
+}
 ```
 
-In `WSHandler`, immediately inside the `if err != nil` after `up.Upgrade`. `checkOrigin` has already counted origin rejections, so guard against double-counting:
+and in each handler:
+
 ```go
-		if !errors.Is(err, websocket.ErrBadHandshake) {
-			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeUpgradeFailed)
+	var originRejected bool
+
+	up := h.upgraderFor(&originRejected)
+
+	conn, err := up.Upgrade(w, r, nil)
+	if err != nil {
+		outcome := obs.OutcomeUpgradeFailed
+		if originRejected {
+			outcome = obs.OutcomeOriginRejected
 		}
+
+		h.metrics.RecordHandshake(r.Context(), obs.KindGame, outcome)
+		// keep the existing log line unchanged
+		return
+	}
 ```
 
 In the auth-read error branch, inside the existing timeout/else split:
