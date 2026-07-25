@@ -48,18 +48,10 @@ func (h *Handler) checkOrigin(r *http.Request) bool {
 		// Dev default: same-host only, matching the pre-allowlist behaviour.
 		u, err := url.Parse(origin)
 		if err != nil {
-			h.metrics.RecordHandshake(r.Context(), wsKindFromPath(r.URL.Path), obs.OutcomeOriginRejected)
-
 			return false
 		}
 
-		if u.Host == r.Host {
-			return true
-		}
-
-		h.metrics.RecordHandshake(r.Context(), wsKindFromPath(r.URL.Path), obs.OutcomeOriginRejected)
-
-		return false
+		return u.Host == r.Host
 	}
 
 	candidate := strings.ToLower(strings.TrimSuffix(origin, "/"))
@@ -70,19 +62,8 @@ func (h *Handler) checkOrigin(r *http.Request) bool {
 	}
 
 	log.Warn().Str("origin", origin).Msg("Rejected websocket upgrade from disallowed origin")
-	h.metrics.RecordHandshake(r.Context(), wsKindFromPath(r.URL.Path), obs.OutcomeOriginRejected)
 
 	return false
-}
-
-// wsKindFromPath labels a handshake as game or lobby. checkOrigin runs before
-// either handler body, so the path is the only signal available there.
-func wsKindFromPath(p string) string {
-	if strings.HasSuffix(p, "/lobby/ws") {
-		return obs.KindLobby
-	}
-
-	return obs.KindGame
 }
 
 // wsMessageTypeLabel collapses a client-supplied message type to a bounded
@@ -98,8 +79,22 @@ func wsMessageTypeLabel(t string) string {
 	}
 }
 
-func (h *Handler) upgrader() websocket.Upgrader {
-	return websocket.Upgrader{CheckOrigin: h.checkOrigin}
+// upgraderFor reports origin rejection through originRejected. Upgrade's
+// error value cannot distinguish the cause: gorilla's ErrBadHandshake is a
+// client-side sentinel that server-side Upgrade never returns, so matching
+// on it silently never fires. CheckOrigin runs synchronously on the same
+// goroutine as Upgrade, so a plain bool needs no locking.
+func (h *Handler) upgraderFor(originRejected *bool) websocket.Upgrader {
+	return websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			allowed := h.checkOrigin(r)
+			if !allowed {
+				*originRejected = true
+			}
+
+			return allowed
+		},
+	}
 }
 
 // closeWithCode tells the client exactly why the socket is going away before
@@ -132,15 +127,20 @@ type OutgoingWSError struct {
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
 
-	up := h.upgrader()
+	var originRejected bool
+
+	up := h.upgraderFor(&originRejected)
 
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
 
-		if !errors.Is(err, websocket.ErrBadHandshake) {
-			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeUpgradeFailed)
+		outcome := obs.OutcomeUpgradeFailed
+		if originRejected {
+			outcome = obs.OutcomeOriginRejected
 		}
+
+		h.metrics.RecordHandshake(r.Context(), obs.KindGame, outcome)
 
 		return
 	}

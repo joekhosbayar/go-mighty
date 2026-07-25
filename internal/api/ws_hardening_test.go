@@ -362,6 +362,50 @@ func TestHandshakeMetricOriginRejected(t *testing.T) {
 	if got[obs.OutcomeOriginRejected] != 1 {
 		t.Fatalf("expected 1 origin_rejected, got %v", got)
 	}
+
+	// The regression this guards against: Upgrade's error value cannot
+	// distinguish an origin rejection from any other handshake failure, so a
+	// naive implementation double-counts this as upgrade_failed too.
+	if got[obs.OutcomeUpgradeFailed] != 0 {
+		t.Fatalf("expected 0 upgrade_failed, got %v", got)
+	}
+}
+
+// TestHandshakeMetricUpgradeFailedNotOrigin drives a handshake failure that
+// has nothing to do with CheckOrigin (no Sec-WebSocket-* headers at all, so
+// gorilla's Upgrade rejects it before CheckOrigin is ever called) and asserts
+// it is counted as upgrade_failed, not origin_rejected. Paired with
+// TestHandshakeMetricOriginRejected's new assertion above, this is what
+// proves the two outcomes are mutually exclusive rather than one leaking
+// into the other.
+func TestHandshakeMetricUpgradeFailedNotOrigin(t *testing.T) {
+	t.Parallel()
+
+	handler, counts := wsMetricsHandler(t)
+	server := serveWS(t, handler)
+
+	// A plain GET carries none of the Connection/Upgrade/Sec-WebSocket-*
+	// headers gorilla requires, so Upgrade rejects it on the very first
+	// check, before CheckOrigin runs at all.
+	resp, err := http.Get(server.URL + "/games/game-1/ws") //nolint:noctx // test-only, mirrors http.Get usage already in this package
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		t.Fatalf("expected the handshake to be rejected, got %d", resp.StatusCode)
+	}
+
+	got := counts("mighty.ws.handshake", "outcome")
+	if got[obs.OutcomeUpgradeFailed] != 1 {
+		t.Fatalf("expected 1 upgrade_failed, got %v", got)
+	}
+
+	if got[obs.OutcomeOriginRejected] != 0 {
+		t.Fatalf("expected 0 origin_rejected, got %v", got)
+	}
 }
 
 func TestHandshakeMetricConnLimitUser(t *testing.T) {

@@ -16,15 +16,20 @@ import (
 
 // LobbyWSHandler handles websocket connections for the global lobby feed.
 func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
-	up := h.upgrader()
+	var originRejected bool
+
+	up := h.upgraderFor(&originRejected)
 
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to upgrade lobby websocket")
 
-		if !errors.Is(err, websocket.ErrBadHandshake) {
-			h.metrics.RecordHandshake(r.Context(), obs.KindLobby, obs.OutcomeUpgradeFailed)
+		outcome := obs.OutcomeUpgradeFailed
+		if originRejected {
+			outcome = obs.OutcomeOriginRejected
 		}
+
+		h.metrics.RecordHandshake(r.Context(), obs.KindLobby, outcome)
 
 		return
 	}
