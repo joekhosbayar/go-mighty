@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/rs/zerolog/log"
@@ -47,10 +48,18 @@ func (h *Handler) checkOrigin(r *http.Request) bool {
 		// Dev default: same-host only, matching the pre-allowlist behaviour.
 		u, err := url.Parse(origin)
 		if err != nil {
+			h.metrics.RecordHandshake(r.Context(), wsKindFromPath(r.URL.Path), obs.OutcomeOriginRejected)
+
 			return false
 		}
 
-		return u.Host == r.Host
+		if u.Host == r.Host {
+			return true
+		}
+
+		h.metrics.RecordHandshake(r.Context(), wsKindFromPath(r.URL.Path), obs.OutcomeOriginRejected)
+
+		return false
 	}
 
 	candidate := strings.ToLower(strings.TrimSuffix(origin, "/"))
@@ -61,8 +70,32 @@ func (h *Handler) checkOrigin(r *http.Request) bool {
 	}
 
 	log.Warn().Str("origin", origin).Msg("Rejected websocket upgrade from disallowed origin")
+	h.metrics.RecordHandshake(r.Context(), wsKindFromPath(r.URL.Path), obs.OutcomeOriginRejected)
 
 	return false
+}
+
+// wsKindFromPath labels a handshake as game or lobby. checkOrigin runs before
+// either handler body, so the path is the only signal available there.
+func wsKindFromPath(p string) string {
+	if strings.HasSuffix(p, "/lobby/ws") {
+		return obs.KindLobby
+	}
+
+	return obs.KindGame
+}
+
+// wsMessageTypeLabel collapses a client-supplied message type to a bounded
+// label set. inMsg.Type is arbitrary attacker-controlled JSON; using it
+// directly as a metric attribute would let one client mint unlimited series
+// and exhaust the free-tier budget, after which data is dropped silently.
+func wsMessageTypeLabel(t string) string {
+	switch t {
+	case WSMessageTypeMove, WSMessageTypeError:
+		return t
+	default:
+		return obs.MsgTypeUnknown
+	}
 }
 
 func (h *Handler) upgrader() websocket.Upgrader {
@@ -104,6 +137,11 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
+
+		if !errors.Is(err, websocket.ErrBadHandshake) {
+			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeUpgradeFailed)
+		}
+
 		return
 	}
 	defer func() { _ = conn.Close() }()
@@ -128,8 +166,10 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			sendError("auth timed out")
+			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthTimeout)
 		} else {
 			sendError("failed to read auth message")
+			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthFailed)
 		}
 
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to read auth message or timed out")
@@ -143,6 +183,8 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.Unmarshal(authMessage, &authReq); err != nil || authReq.Type != "AUTH" {
 		sendError("expected AUTH message")
+		h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthFailed)
+
 		return
 	}
 
@@ -150,8 +192,10 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
 			sendError("unauthorized")
+			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthFailed)
 		} else {
 			sendError("auth unavailable")
+			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthUnavailable)
 		}
 
 		return
@@ -165,6 +209,13 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 				Str("user_id", claims.UserID).
 				Err(connErr).
 				Msg("Rejected websocket: connection cap reached")
+
+			outcome := obs.OutcomeConnLimitIP
+			if errors.Is(connErr, errTooManyUserConns) {
+				outcome = obs.OutcomeConnLimitUser
+			}
+
+			h.metrics.RecordHandshake(r.Context(), obs.KindGame, outcome)
 			closeWithCode(conn, websocket.CloseTryAgainLater, connErr.Error(), &wsWriteMu)
 
 			return
@@ -172,6 +223,11 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 		defer release()
 	}
+
+	h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeOK)
+	h.metrics.AddConnection(r.Context(), obs.KindGame, 1)
+
+	defer h.metrics.AddConnection(r.Context(), obs.KindGame, -1)
 
 	// 2. Swap the auth deadline for a rolling idle deadline. A pong or any
 	// inbound message refreshes it; a silent socket is reaped after
@@ -250,6 +306,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 				Str("user_id", claims.UserID).
 				Msg("WebSocket message rate exceeded, closing socket")
 			closeWithCode(conn, websocket.ClosePolicyViolation, "rate limit exceeded", &wsWriteMu)
+			h.metrics.RecordWSMessage(r.Context(), obs.MsgTypeUnknown, obs.MsgRateLimited)
 
 			break
 		}
@@ -257,6 +314,8 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		var inMsg IncomingWSMessage
 		if err := json.Unmarshal(message, &inMsg); err != nil {
 			sendError("invalid message format")
+			h.metrics.RecordWSMessage(r.Context(), obs.MsgTypeUnknown, obs.MsgInvalid)
+
 			continue
 		}
 
@@ -264,8 +323,12 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			convertedPayload, err := ConvertPayload(inMsg.MoveType, inMsg.Payload)
 			if err != nil {
 				sendError("invalid payload structure: " + err.Error())
+				h.metrics.RecordWSMessage(r.Context(), wsMessageTypeLabel(inMsg.Type), obs.MsgInvalid)
+
 				continue
 			}
+
+			h.metrics.RecordWSMessage(r.Context(), wsMessageTypeLabel(inMsg.Type), obs.MsgAccepted)
 
 			_, err = h.svc.ProcessMove(r.Context(), gameID, claims.UserID, inMsg.MoveType, convertedPayload, inMsg.ClientVersion)
 			if err != nil {

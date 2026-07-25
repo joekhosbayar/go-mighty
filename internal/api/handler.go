@@ -45,6 +45,7 @@ type Handler struct {
 	wsMessageBurst   float64
 	conns            *connRegistry
 	trustProxy       bool
+	metrics          *obs.Metrics
 }
 
 // NewHandler creates a new Handler with the given services. Options carry the

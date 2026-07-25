@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/rs/zerolog/log"
 )
@@ -20,6 +21,11 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to upgrade lobby websocket")
+
+		if !errors.Is(err, websocket.ErrBadHandshake) {
+			h.metrics.RecordHandshake(r.Context(), obs.KindLobby, obs.OutcomeUpgradeFailed)
+		}
+
 		return
 	}
 	defer func() { _ = conn.Close() }()
@@ -43,8 +49,10 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			sendError("auth timed out")
+			h.metrics.RecordHandshake(r.Context(), obs.KindLobby, obs.OutcomeAuthTimeout)
 		} else {
 			sendError("failed to read auth message")
+			h.metrics.RecordHandshake(r.Context(), obs.KindLobby, obs.OutcomeAuthFailed)
 		}
 		return
 	}
@@ -55,6 +63,8 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.Unmarshal(authMessage, &authReq); err != nil || authReq.Type != "AUTH" {
 		sendError("expected AUTH message")
+		h.metrics.RecordHandshake(r.Context(), obs.KindLobby, obs.OutcomeAuthFailed)
+
 		return
 	}
 
@@ -62,8 +72,10 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
 			sendError("unauthorized")
+			h.metrics.RecordHandshake(r.Context(), obs.KindLobby, obs.OutcomeAuthFailed)
 		} else {
 			sendError("auth unavailable")
+			h.metrics.RecordHandshake(r.Context(), obs.KindLobby, obs.OutcomeAuthUnavailable)
 		}
 		return
 	}
@@ -71,11 +83,23 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	if h.conns != nil {
 		release, connErr := h.conns.acquire(claims.UserID, ClientIP(r, h.trustProxy))
 		if connErr != nil {
+			outcome := obs.OutcomeConnLimitIP
+			if errors.Is(connErr, errTooManyUserConns) {
+				outcome = obs.OutcomeConnLimitUser
+			}
+
+			h.metrics.RecordHandshake(r.Context(), obs.KindLobby, outcome)
 			closeWithCode(conn, websocket.CloseTryAgainLater, connErr.Error(), &wsWriteMu)
+
 			return
 		}
 		defer release()
 	}
+
+	h.metrics.RecordHandshake(r.Context(), obs.KindLobby, obs.OutcomeOK)
+	h.metrics.AddConnection(r.Context(), obs.KindLobby, 1)
+
+	defer h.metrics.AddConnection(r.Context(), obs.KindLobby, -1)
 
 	_ = conn.SetReadDeadline(time.Now().Add(wsIdleTimeout))
 	conn.SetPongHandler(func(string) error {

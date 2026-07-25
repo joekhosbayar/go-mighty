@@ -3,6 +3,7 @@ package api
 import (
 	"strings"
 
+	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 )
 
@@ -60,6 +61,13 @@ func WithConnLimits(perUser, perIP int) Option {
 // per-IP caps.
 func WithTrustedProxy(trust bool) Option {
 	return func(h *Handler) { h.trustProxy = trust }
+}
+
+// WithMetrics installs the OTel instruments. Without it the handler records
+// nothing: *obs.Metrics methods are nil-safe, which keeps local dev and the
+// existing tests free of telemetry wiring.
+func WithMetrics(m *obs.Metrics) Option {
+	return func(h *Handler) { h.metrics = m }
 }
 
 // AllowedOrigins returns the resolved, normalized origin allowlist (empty
