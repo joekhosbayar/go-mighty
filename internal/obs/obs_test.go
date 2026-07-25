@@ -44,9 +44,15 @@ func TestInitEnabledBuildsSDKProviders(t *testing.T) {
 	require.IsType(t, &sdktrace.TracerProvider{}, p.Tracer)
 	require.IsType(t, &sdkmetric.MeterProvider{}, p.Meter)
 
+	// Deliberately not asserting on error text: an unreachable loopback port
+	// does not guarantee an immediate RST on every OS/network stack (VPNs,
+	// security software, CI network policy). When it isn't instant, the
+	// per-attempt timeout fires first and the error is "DeadlineExceeded"
+	// instead of "connection refused" — same failure, different wording.
+	// Asserting substance (an error occurred) instead of wording keeps this
+	// test from being flaky. Do not "fix" this back into an ErrorContains.
 	err = p.Shutdown(context.Background())
 	require.Error(t, err)
-	require.ErrorContains(t, err, "connection refused")
 }
 
 // Shutdown must be safe to call more than once and must not re-attempt the
