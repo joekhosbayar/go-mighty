@@ -1480,9 +1480,13 @@ func findSum(t *testing.T, rm metricdata.ResourceMetrics, name string) []metricd
 }
 
 func TestRecordHandshakeCarriesOutcomeAndKind(t *testing.T) {
+	// The (Lobby, OK) call is load-bearing: without it, kind and outcome
+	// co-vary perfectly and the test would still pass against an
+	// implementation that dropped the kind attribute entirely.
 	rm := collect(t, func(m *Metrics) {
 		m.RecordHandshake(context.Background(), KindGame, OutcomeOK)
 		m.RecordHandshake(context.Background(), KindGame, OutcomeOK)
+		m.RecordHandshake(context.Background(), KindLobby, OutcomeOK)
 		m.RecordHandshake(context.Background(), KindLobby, OutcomeOriginRejected)
 	})
 
@@ -1967,8 +1971,30 @@ Immediately after the connection-limit block (the point past which the connectio
 In the read loop:
 - after the rate-limit `closeWithCode`, before `break`: `h.metrics.RecordWSMessage(r.Context(), obs.MsgTypeUnknown, obs.MsgRateLimited)`
 - in the `json.Unmarshal` failure branch: `h.metrics.RecordWSMessage(r.Context(), obs.MsgTypeUnknown, obs.MsgInvalid)`
-- in the `ConvertPayload` failure branch: `h.metrics.RecordWSMessage(r.Context(), inMsg.Type, obs.MsgInvalid)`
-- immediately after a successful `json.Unmarshal` of a frame that reaches `ProcessMove`: `h.metrics.RecordWSMessage(r.Context(), inMsg.Type, obs.MsgAccepted)`
+- in the `ConvertPayload` failure branch: `h.metrics.RecordWSMessage(r.Context(), wsMessageTypeLabel(inMsg.Type), obs.MsgInvalid)`
+- immediately after a successful `json.Unmarshal` of a frame that reaches `ProcessMove`: `h.metrics.RecordWSMessage(r.Context(), wsMessageTypeLabel(inMsg.Type), obs.MsgAccepted)`
+
+**`inMsg.Type` must NEVER reach a metric attribute unsanitised.** It is a raw
+client-supplied JSON string, so passing it through would let any authenticated
+client mint unlimited metric series by sending random `type` values — silently
+exhausting the 10k free-tier budget, after which Grafana Cloud drops data. The
+cardinality guard test cannot catch this: it scans attribute *key* names, not
+values. Add an allowlist helper next to `wsKindFromPath`:
+
+```go
+// wsMessageTypeLabel collapses a client-supplied message type to a bounded
+// label set. inMsg.Type is arbitrary attacker-controlled JSON; using it
+// directly as a metric attribute would let one client mint unlimited series
+// and exhaust the free-tier budget, after which data is dropped silently.
+func wsMessageTypeLabel(t string) string {
+	switch t {
+	case WSMessageTypeMove, WSMessageTypeError:
+		return t
+	default:
+		return obs.MsgTypeUnknown
+	}
+}
+```
 
 `ProcessMove`'s own verdict is **not** recorded here — Task 9 records it as `mighty.moves` in the service layer, where the HTTP path is covered too.
 
