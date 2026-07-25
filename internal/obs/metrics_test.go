@@ -52,6 +52,12 @@ func findSum(t *testing.T, rm metricdata.ResourceMetrics, name string) []metricd
 	return nil
 }
 
+// handshakePair identifies one (kind, outcome) series.
+type handshakePair struct {
+	kind    string
+	outcome string
+}
+
 func TestRecordHandshakeCarriesOutcomeAndKind(t *testing.T) {
 	t.Parallel()
 
@@ -59,22 +65,35 @@ func TestRecordHandshakeCarriesOutcomeAndKind(t *testing.T) {
 		m.RecordHandshake(context.Background(), KindGame, OutcomeOK)
 		m.RecordHandshake(context.Background(), KindGame, OutcomeOK)
 		m.RecordHandshake(context.Background(), KindLobby, OutcomeOriginRejected)
+		// Same outcome as the first two calls, different kind. Without this,
+		// kind and outcome co-vary across every call and a recorder that
+		// dropped kind entirely would still produce the "right" two series
+		// (OK=2, OriginRejected=1) - the test would pass against a broken
+		// implementation. This call breaks that coincidence.
+		m.RecordHandshake(context.Background(), KindLobby, OutcomeOK)
 	})
 
 	points := findSum(t, rm, "mighty.ws.handshake")
-	require.Len(t, points, 2, "expected one series per (kind, outcome) pair")
+	require.Len(t, points, 3, "expected one series per distinct (kind, outcome) pair")
 
-	byOutcome := map[string]int64{}
+	byPair := map[handshakePair]int64{}
 
 	for _, p := range points {
-		outcome, ok := p.Attributes.Value("outcome")
-		require.True(t, ok)
+		kind, ok := p.Attributes.Value("kind")
+		require.True(t, ok, "handshake series is missing the kind attribute")
 
-		byOutcome[outcome.AsString()] = p.Value
+		outcome, ok := p.Attributes.Value("outcome")
+		require.True(t, ok, "handshake series is missing the outcome attribute")
+
+		byPair[handshakePair{kind: kind.AsString(), outcome: outcome.AsString()}] = p.Value
 	}
 
-	require.Equal(t, int64(2), byOutcome[OutcomeOK])
-	require.Equal(t, int64(1), byOutcome[OutcomeOriginRejected])
+	require.Equal(t, int64(2), byPair[handshakePair{kind: KindGame, outcome: OutcomeOK}])
+	require.Equal(t, int64(1), byPair[handshakePair{kind: KindLobby, outcome: OutcomeOriginRejected}])
+	// Same outcome (OK) under a different kind (Lobby) than the first
+	// assertion: this is what actually proves kind distinguishes series
+	// rather than being dropped or ignored.
+	require.Equal(t, int64(1), byPair[handshakePair{kind: KindLobby, outcome: OutcomeOK}])
 }
 
 func TestAddConnectionTracksActiveCount(t *testing.T) {
