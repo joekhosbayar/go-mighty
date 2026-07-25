@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -360,6 +361,12 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(games)
 }
 
+// msgSuccessResponse is the log message for the default (2xx) case. It is a
+// named constant, rather than an inline literal, because handler_test.go's
+// status-to-message table also references it, and the two together push the
+// literal past goconst's duplicate-string threshold.
+const msgSuccessResponse = "Success response"
+
 // LoggingMiddleware logs the incoming HTTP requests and their responses.
 //
 // It is a Handler method (rather than a package-level function) so it can
@@ -370,12 +377,6 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		remote := ClientIP(req, h.trustProxy)
-
-		log.Info().
-			Str("method", req.Method).
-			Str("url", req.URL.String()).
-			Str("remote", remote).
-			Msg("Incoming request")
 
 		lrw := &LoggingResponseWriter{ResponseWriter: w}
 		start := time.Now()
@@ -389,15 +390,17 @@ func (h *Handler) LoggingMiddleware(next http.Handler) http.Handler {
 			statusCode = http.StatusOK
 		}
 
-		event := log.Info()
-		msg := "Success response"
+		logger := obs.Log(req.Context())
+
+		event := logger.Info()
+		msg := msgSuccessResponse
 
 		switch {
 		case statusCode >= 500:
-			event = log.Error()
+			event = logger.Error()
 			msg = "5xx response"
 		case statusCode >= 400:
-			event = log.Warn()
+			event = logger.Warn()
 			msg = "4xx response"
 		case statusCode >= 300:
 			msg = "3xx redirection response"

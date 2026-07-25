@@ -10,12 +10,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
+	zlog "github.com/rs/zerolog/log"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestLoggingResponseWriter_WriteHeader tests that WriteHeader properly sets the status code.
@@ -150,24 +155,117 @@ func TestLoggingResponseWriter_MultipleWrites(t *testing.T) {
 	}
 }
 
+// logCaptureMu serializes access to the shared zlog.Logger package-level
+// global that captureLogLines swaps out. Subtests of TestLoggingMiddleware
+// run with t.Parallel(), so without this lock two subtests could stomp on
+// each other's buffer swap and both read the wrong output.
+var logCaptureMu sync.Mutex
+
+// captureLogLines swaps the global zerolog logger for one writing to a
+// buffer for the duration of fn, then returns each emitted line decoded as
+// JSON. LoggingMiddleware logs synchronously on the calling goroutine, so it
+// is safe to restore the original logger as soon as fn returns.
+func captureLogLines(t *testing.T, fn func()) []map[string]any {
+	t.Helper()
+
+	logCaptureMu.Lock()
+	defer logCaptureMu.Unlock()
+
+	var buf bytes.Buffer
+
+	original := zlog.Logger
+	zlog.Logger = zerolog.New(&buf)
+
+	fn()
+
+	zlog.Logger = original
+
+	var lines []map[string]any
+
+	for raw := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+		if raw == "" {
+			continue
+		}
+
+		var entry map[string]any
+
+		require.NoError(t, json.Unmarshal([]byte(raw), &entry))
+
+		lines = append(lines, entry)
+	}
+
+	return lines
+}
+
+// loggingMiddlewareCase is one table entry for TestLoggingMiddleware: a
+// handler to wrap plus the response and single log line it should produce.
+type loggingMiddlewareCase struct {
+	name          string
+	handler       http.HandlerFunc
+	expectedCode  int
+	expectedBody  string
+	expectedLevel string
+	expectedMsg   string
+	checkDuration bool
+}
+
+// checkLoggingMiddlewareResult asserts the recorded HTTP response and the
+// single captured log line against tt. Split out of TestLoggingMiddleware's
+// subtest body (rather than inlined) so that function stays under the
+// gocyclo threshold.
+func checkLoggingMiddlewareResult(t *testing.T, tt loggingMiddlewareCase, req *http.Request, rec *httptest.ResponseRecorder, start time.Time, lines []map[string]any) {
+	t.Helper()
+
+	assert.Equal(t, tt.expectedCode, rec.Code)
+
+	if tt.expectedBody != "" {
+		assert.Contains(t, strings.TrimSpace(rec.Body.String()), strings.TrimSpace(tt.expectedBody))
+	}
+
+	if tt.checkDuration {
+		assert.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond)
+	}
+
+	// Exactly one line per request: the old code emitted a pre-flight
+	// "Incoming request" line in addition to this one.
+	require.Len(t, lines, 1, "expected exactly 1 log line per request, got %v", lines)
+
+	entry := lines[0]
+
+	assert.Equal(t, tt.expectedLevel, entry["level"])
+	assert.Equal(t, tt.expectedMsg, entry["message"])
+	assert.Contains(t, entry, "duration")
+	assert.Equal(t, req.Method, entry["method"])
+	assert.Equal(t, req.URL.String(), entry["url"])
+	assert.Contains(t, entry, "remote")
+
+	responseCode, ok := entry["responseCode"].(float64)
+	require.True(t, ok, "expected responseCode field to be a number, got %v (%T)", entry["responseCode"], entry["responseCode"])
+	assert.Equal(t, tt.expectedCode, int(responseCode))
+}
+
 // TestLoggingMiddleware tests the logging middleware with various response scenarios.
+//
+// Deliberately not t.Parallel() at this level: captureLogLines swaps the
+// process-wide zlog.Logger global, and other tests in this package log
+// through that same global. Running as a top-level non-parallel test keeps
+// this whole test (and its parallel subtests, serialized against each other
+// by logCaptureMu) out of the concurrent batch other parallel top-level
+// tests run in, so their log output can never land in our buffer.
+//
+//nolint:paralleltest // see comment above: must stay out of the parallel batch.
 func TestLoggingMiddleware(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name          string
-		handler       http.HandlerFunc
-		expectedCode  int
-		expectedBody  string
-		checkDuration bool
-	}{
+	tests := []loggingMiddlewareCase{
 		{
 			name: "SuccessfulResponse",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 			},
-			expectedCode: http.StatusOK,
-			expectedBody: `{"status":"ok"}`,
+			expectedCode:  http.StatusOK,
+			expectedBody:  `{"status":"ok"}`,
+			expectedLevel: zerolog.LevelInfoValue,
+			expectedMsg:   msgSuccessResponse,
 		},
 		{
 			name: "ExplicitCreatedStatus",
@@ -175,36 +273,46 @@ func TestLoggingMiddleware(t *testing.T) {
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte("created"))
 			},
-			expectedCode: http.StatusCreated,
-			expectedBody: "created",
+			expectedCode:  http.StatusCreated,
+			expectedBody:  "created",
+			expectedLevel: zerolog.LevelInfoValue,
+			expectedMsg:   msgSuccessResponse,
 		},
 		{
 			name: "BadRequestError",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "bad request", http.StatusBadRequest)
 			},
-			expectedCode: http.StatusBadRequest,
+			expectedCode:  http.StatusBadRequest,
+			expectedLevel: zerolog.LevelWarnValue,
+			expectedMsg:   "4xx response",
 		},
 		{
 			name: "NotFoundError",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "not found", http.StatusNotFound)
 			},
-			expectedCode: http.StatusNotFound,
+			expectedCode:  http.StatusNotFound,
+			expectedLevel: zerolog.LevelWarnValue,
+			expectedMsg:   "4xx response",
 		},
 		{
 			name: "InternalServerError",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			},
-			expectedCode: http.StatusInternalServerError,
+			expectedCode:  http.StatusInternalServerError,
+			expectedLevel: zerolog.LevelErrorValue,
+			expectedMsg:   "5xx response",
 		},
 		{
 			name: "RedirectResponse",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/new-location", http.StatusFound)
 			},
-			expectedCode: http.StatusFound,
+			expectedCode:  http.StatusFound,
+			expectedLevel: zerolog.LevelInfoValue,
+			expectedMsg:   "3xx redirection response",
 		},
 		{
 			name: "SlowResponse",
@@ -215,6 +323,8 @@ func TestLoggingMiddleware(t *testing.T) {
 			},
 			expectedCode:  http.StatusOK,
 			expectedBody:  "slow",
+			expectedLevel: zerolog.LevelInfoValue,
+			expectedMsg:   msgSuccessResponse,
 			checkDuration: true,
 		},
 	}
@@ -222,41 +332,18 @@ func TestLoggingMiddleware(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			// Create a test handler wrapped with logging middleware
-			wrapped := (&Handler{}).LoggingMiddleware(tt.handler)
 
-			// Create test request
+			wrapped := (&Handler{}).LoggingMiddleware(tt.handler)
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", nil)
 			rec := httptest.NewRecorder()
-
-			// Capture start time for duration check
 			start := time.Now()
 
-			// Execute request
-			wrapped.ServeHTTP(rec, req)
+			// Execute request, capturing exactly what LoggingMiddleware logs.
+			lines := captureLogLines(t, func() {
+				wrapped.ServeHTTP(rec, req)
+			})
 
-			// Check status code
-			if rec.Code != tt.expectedCode {
-				t.Errorf("Expected status code %d, got %d", tt.expectedCode, rec.Code)
-			}
-
-			// Check body if specified
-			if tt.expectedBody != "" {
-				body := strings.TrimSpace(rec.Body.String())
-
-				expectedBody := strings.TrimSpace(tt.expectedBody)
-				if !strings.Contains(body, expectedBody) {
-					t.Errorf("Expected body to contain %q, got %q", expectedBody, body)
-				}
-			}
-
-			// Check duration if specified
-			if tt.checkDuration {
-				elapsed := time.Since(start)
-				if elapsed < 50*time.Millisecond {
-					t.Errorf("Expected duration >= 50ms, got %v", elapsed)
-				}
-			}
+			checkLoggingMiddlewareResult(t, tt, req, rec, start, lines)
 		})
 	}
 }
