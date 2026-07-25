@@ -32,6 +32,8 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_started
+      alloy:
+        condition: service_started
     logging:
       driver: "json-file"
       options:

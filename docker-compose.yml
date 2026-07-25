@@ -16,6 +16,7 @@ services:
       AWS_SESSION_TOKEN: "${AWS_SESSION_TOKEN:-}"
       AWS_PROFILE: "${AWS_PROFILE:-}"
       AWS_REGION: "${AWS_REGION:-us-east-1}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
     secrets:
       - postgres_password
     volumes:
@@ -29,6 +30,34 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+  # Opt-in only: `docker compose --profile observability up`. Ships to the same
+  # Grafana Cloud stack tagged env=dev, which is cheaper than standing up local
+  # Tempo + Loki + Grafana and lets dashboards filter on the label.
+  alloy:
+    profiles: ["observability"]
+    image: grafana/alloy:v1.10.0
+    command:
+      - run
+      - --server.http.listen-addr=127.0.0.1:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    environment:
+      MIGHTY_ENV: "dev"
+      POSTGRES_CONN: "postgres://postgres:mightypassword@postgres:5432/postgres?sslmode=disable"
+      GRAFANA_OTLP_ENDPOINT: "${GRAFANA_OTLP_ENDPOINT:-}"
+      GRAFANA_OTLP_INSTANCE_ID: "${GRAFANA_OTLP_INSTANCE_ID:-}"
+      GRAFANA_PROM_URL: "${GRAFANA_PROM_URL:-}"
+      GRAFANA_PROM_USER_ID: "${GRAFANA_PROM_USER_ID:-}"
+      GRAFANA_LOKI_URL: "${GRAFANA_LOKI_URL:-}"
+      GRAFANA_LOKI_USER_ID: "${GRAFANA_LOKI_USER_ID:-}"
+      GRAFANA_TOKEN: "${GRAFANA_TOKEN:-}"
+    volumes:
+      - ./deploy/compose/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+
   postgres:
     image: "postgres:16"
     environment:

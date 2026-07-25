@@ -28,6 +28,9 @@ ALLOWED_ORIGINS=https://themighty.gg,https://www.themighty.gg
 TRUST_PROXY_HEADERS=true
 API_DOMAIN=$(param /mighty/api_domain)
 ACME_EMAIL=$(param /mighty/acme_email)
+OTEL_EXPORTER_OTLP_ENDPOINT=alloy:4317
+OTEL_TRACES_SAMPLER_ARG=1
+MIGHTY_ENV=prod
 EOF
 
 aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_HOST"
