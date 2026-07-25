@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 )
 
 // MaxBodyBytes caps request bodies at 64KB (spec Section 3, Layer 1). No
@@ -29,4 +30,21 @@ func BodyLimitMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// TraceFilter decides which requests otelhttp instruments.
+//
+// WebSocket routes are excluded because otelhttp's ResponseWriter wrapper does
+// not reliably implement http.Hijacker, which gorilla/websocket requires —
+// wrapping them would break every socket. WS traffic is instrumented directly
+// in ws.go instead, where a per-message span is the right shape anyway.
+//
+// /healthz is excluded because the Route 53 probe hits it every 30s and would
+// otherwise contribute ~2900 meaningless spans a day against the trace budget.
+func TraceFilter(r *http.Request) bool {
+	if r.URL.Path == "/healthz" {
+		return false
+	}
+
+	return !strings.HasSuffix(r.URL.Path, "/ws")
 }

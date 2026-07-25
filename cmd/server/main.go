@@ -11,6 +11,7 @@ import (
 
 	"github.com/joekhosbayar/go-mighty/internal/api"
 	"github.com/joekhosbayar/go-mighty/internal/infra"
+	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
@@ -18,6 +19,8 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	zlog "github.com/rs/zerolog/log"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 )
 
 // Safeguard tunables (spec Section 3). Named here, not inlined into the
@@ -44,6 +47,41 @@ func main() {
 	}
 
 	zerolog.SetGlobalLevel(level)
+
+	ctx := context.Background()
+
+	// Observability: inert unless OTEL_EXPORTER_OTLP_ENDPOINT is set. Init
+	// before the stores so a misconfigured endpoint fails fast rather than
+	// after the (slower) Postgres connect-retry loop below.
+	obsCfg := obs.ConfigFromEnv()
+
+	obsProvider, err := obs.Init(ctx, obsCfg)
+	if err != nil {
+		log.Fatalf("observability init: %v", err)
+	}
+
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if shutdownErr := obsProvider.Shutdown(shutdownCtx); shutdownErr != nil {
+			zlog.Warn().Err(shutdownErr).Msg("observability shutdown")
+		}
+	}()
+
+	metrics, err := obs.NewMetrics(obsProvider.Meter)
+	if err != nil {
+		log.Fatalf("observability metrics: %v", err)
+	}
+
+	// Go runtime metrics (goroutines, heap, GC pause) — the difference
+	// between diagnosing and guessing on a 2 GB box.
+	if obsProvider.Enabled {
+		if runtimeErr := otelruntime.Start(otelruntime.WithMeterProvider(obsProvider.Meter)); runtimeErr != nil {
+			zlog.Warn().Err(runtimeErr).Msg("runtime metrics unavailable")
+		}
+	}
+
 	// 1. Config
 	pgConn := os.Getenv("POSTGRES_CONN")
 	if pgConn == "" {
@@ -56,10 +94,8 @@ func main() {
 	}
 
 	// 2. Store
-	var (
-		pgStore *postgres.Store
-		err     error
-	)
+	var pgStore *postgres.Store
+
 	for i := range 30 {
 		pgStore, err = postgres.NewStore(pgConn)
 		if err == nil {
@@ -85,7 +121,7 @@ func main() {
 	limiter := ratelimit.New(rlClient)
 
 	// 3. Service
-	svc := service.NewGame(redisStore, pgStore)
+	svc := service.NewGame(redisStore, pgStore, service.WithMetrics(metrics))
 
 	// 4. API
 	cognitoPoolID := os.Getenv("COGNITO_POOL_ID")
@@ -100,7 +136,6 @@ func main() {
 		cognitoRegion = "us-east-1"
 	}
 
-	ctx := context.Background()
 	issuer := fmt.Sprintf("https://cognito-idp.%s.amazonaws.com/%s", cognitoRegion, cognitoPoolID)
 
 	fetcher, err := infra.NewCognitoAttributesFetcher(ctx, cognitoRegion, cognitoPoolID)
@@ -129,7 +164,8 @@ func main() {
 		api.WithAllowedOrigins(allowedOrigins),
 		api.WithWSMessageRate(wsMessagesPerSec, wsMessageBurst),
 		api.WithConnLimits(connsPerUser, connsPerIP),
-		api.WithTrustedProxy(trustProxy))
+		api.WithTrustedProxy(trustProxy),
+		api.WithMetrics(metrics))
 
 	// Echo the resolved safeguard configuration once at startup. Two failure
 	// modes are otherwise silent in production: a degenerate ALLOWED_ORIGINS
@@ -158,9 +194,21 @@ func main() {
 		Int("connLimitPerIP", connsPerIP).
 		Float64("wsMessagesPerSec", wsMessagesPerSec).
 		Float64("wsMessageBurst", wsMessageBurst).
+		Bool("telemetryEnabled", obsProvider.Enabled).
+		Str("otlpEndpoint", obsCfg.Endpoint).
+		Float64("traceSampleRatio", obsCfg.SampleRatio).
 		Msg("resolved safeguard configuration")
 
 	// 5. Router
+	//
+	// Routes are registered on a standard http.ServeMux using Go 1.22+
+	// method+pattern syntax (e.g. "GET /games/{id}"). otelhttp derives the
+	// low-cardinality http.route span/metric attribute automatically from
+	// http.Request.Pattern, which the mux itself populates once it matches a
+	// route — no per-route otelhttp.WithRouteTag wrapping is needed. (That
+	// helper doesn't exist in the resolved contrib/otelhttp version; verified
+	// empirically that the outer otelhttp.NewHandler wrap below alone
+	// produces http.route="/games/{id}" rather than the raw path.)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /games", handler.ListGamesHandler)
 	mux.Handle("POST /games", handler.RequireAuth(
@@ -181,13 +229,20 @@ func main() {
 
 	log.Printf("Server starting on port %s", port)
 
+	rootHandler := handler.LoggingMiddleware(api.BodyLimitMiddleware(mux))
+
+	rootHandler = otelhttp.NewHandler(rootHandler, "mighty",
+		otelhttp.WithTracerProvider(obsProvider.Tracer),
+		otelhttp.WithMeterProvider(obsProvider.Meter),
+		otelhttp.WithFilter(api.TraceFilter))
+
 	// ReadTimeout and WriteTimeout are deliberately unset: both apply to
 	// hijacked connections and would kill long-lived WebSockets mid-game.
 	// ReadHeaderTimeout is the safe one — it bounds slowloris-style header
 	// stalls without touching an established socket.
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           handler.LoggingMiddleware(api.BodyLimitMiddleware(mux)),
+		Handler:           rootHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 16,
