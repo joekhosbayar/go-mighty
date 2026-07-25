@@ -42,8 +42,7 @@ func TestLogAddsTraceIDWhenSpanPresent(t *testing.T) {
 	defer span.End()
 
 	out := captureLog(t, func() {
-		logger := Log(ctx)
-		logger.Info().Msg("hello")
+		Log(ctx).Info().Msg("hello")
 	})
 
 	require.Equal(t, span.SpanContext().TraceID().String(), out["trace_id"])
@@ -53,8 +52,7 @@ func TestLogAddsTraceIDWhenSpanPresent(t *testing.T) {
 //nolint:paralleltest // see TestLogAddsTraceIDWhenSpanPresent.
 func TestLogOmitsTraceIDWithoutSpan(t *testing.T) {
 	out := captureLog(t, func() {
-		logger := Log(context.Background())
-		logger.Info().Msg("hello")
+		Log(context.Background()).Info().Msg("hello")
 	})
 
 	require.NotContains(t, out, "trace_id")

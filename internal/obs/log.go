@@ -17,14 +17,25 @@ import (
 //
 // trace_id is a log FIELD, never a Loki label — it is unbounded and would
 // create one log stream per trace.
-func Log(ctx context.Context) zerolog.Logger {
+//
+// Returns *zerolog.Logger, not a value: zerolog.Logger's level methods
+// (Info/Warn/Error/...) have pointer receivers, and a value returned from a
+// function call is not addressable, so callers could not chain
+// Log(ctx).Info() without this. In the no-span case this returns
+// &zlog.Logger — the address of the package-level global, not a copy — which
+// is deliberate: it keeps that path allocation-free and means a later
+// reassignment of the global (e.g. in tests that swap it) is observed by
+// anyone holding a previously-returned pointer.
+func Log(ctx context.Context) *zerolog.Logger {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
-		return zlog.Logger
+		return &zlog.Logger
 	}
 
-	return zlog.Logger.With().
+	l := zlog.Logger.With().
 		Str("trace_id", sc.TraceID().String()).
 		Str("span_id", sc.SpanID().String()).
 		Logger()
+
+	return &l
 }
