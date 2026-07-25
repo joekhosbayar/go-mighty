@@ -11,8 +11,15 @@ services:
       COGNITO_POOL_ID: "${COGNITO_POOL_ID:-}"
       COGNITO_CLIENT_ID: "${COGNITO_CLIENT_ID:-}"
       COGNITO_REGION: "${COGNITO_REGION:-us-east-1}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      AWS_SESSION_TOKEN: "${AWS_SESSION_TOKEN:-}"
+      AWS_PROFILE: "${AWS_PROFILE:-}"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
     secrets:
       - postgres_password
+    volumes:
+      - ~/.aws:/home/nonroot/.aws:ro
     depends_on:
       - redis
       - postgres   # Mighty will start after Redis and Postgres containers start
@@ -34,7 +41,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations/000001_initial_schema.up.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./migrations/000001_initial_schema.up.sql:/docker-entrypoint-initdb.d/01_initial.sql
+      - ./migrations/000002_cognito_cutover.up.sql:/docker-entrypoint-initdb.d/02_cognito.sql
 
 secrets:
   postgres_password:

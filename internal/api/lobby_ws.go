@@ -28,9 +28,11 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 
 	var wsWriteMu sync.Mutex
 	sendError := func(errMsg string) {
+		log.Warn().Str("error", errMsg).Msg("Lobby websocket auth failed")
 		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
 			log.Warn().Err(wsErr).Msg("Failed to send lobby websocket error")
 		}
+		closeWithCode(conn, websocket.ClosePolicyViolation, errMsg, &wsWriteMu)
 	}
 
 	// 1. Wait for First Message Auth with 5s timeout

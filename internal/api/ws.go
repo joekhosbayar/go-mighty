@@ -113,9 +113,11 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	var wsWriteMu sync.Mutex
 
 	sendError := func(errMsg string) {
+		log.Warn().Str("error", errMsg).Msg("Game websocket error")
 		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
 			log.Warn().Str("game_id", gameID).Err(wsErr).Msg("Failed to send websocket error")
 		}
+		closeWithCode(conn, websocket.ClosePolicyViolation, errMsg, &wsWriteMu)
 	}
 
 	// 1. Wait for First Message Auth with 5s timeout
