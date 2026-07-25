@@ -1209,7 +1209,7 @@ git commit -m "feat(obs): add OTel SDK lifecycle, no-op unless OTLP endpoint set
 
 **Interfaces:**
 - Consumes: nothing from Task 5 at runtime; shares the package.
-- Produces: `func Log(ctx context.Context) zerolog.Logger`
+- Produces: `func Log(ctx context.Context) *zerolog.Logger`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1302,16 +1302,25 @@ import (
 //
 // trace_id is a log FIELD, never a Loki label — it is unbounded and would
 // create one log stream per trace.
-func Log(ctx context.Context) zerolog.Logger {
+//
+// Returns *zerolog.Logger, not a value: zerolog's Info/Warn/Error have pointer
+// receivers, and a function's return value is not addressable, so a value
+// return would make the chained obs.Log(ctx).Warn() form used throughout
+// Tasks 8 and 11 fail to compile.
+func Log(ctx context.Context) *zerolog.Logger {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
-		return zlog.Logger
+		// Address of the package global, not a copy: keeps the zero-overhead
+		// path allocation-free and observes later reassignment of the global.
+		return &zlog.Logger
 	}
 
-	return zlog.Logger.With().
+	l := zlog.Logger.With().
 		Str("trace_id", sc.TraceID().String()).
 		Str("span_id", sc.SpanID().String()).
 		Logger()
+
+	return &l
 }
 ```
 
@@ -1348,6 +1357,9 @@ func (h *Handler) LoggingMiddleware(next http.Handler) http.Handler {
 		event := logger.Info()
 		msg := "Success response"
 
+		// All five cases below already exist in the current code. Keep every
+		// one of them, and keep the field name `responseCode` — renaming it
+		// breaks the existing test and any log query built on it.
 		switch {
 		case statusCode >= 500:
 			event = logger.Error()
@@ -1355,13 +1367,17 @@ func (h *Handler) LoggingMiddleware(next http.Handler) http.Handler {
 		case statusCode >= 400:
 			event = logger.Warn()
 			msg = "4xx response"
+		case statusCode >= 300:
+			msg = "3xx redirection response"
+		case statusCode >= 100 && statusCode < 200:
+			msg = "1xx informational response"
 		}
 
 		event.
 			Str("method", req.Method).
 			Str("url", req.URL.String()).
 			Str("remote", ClientIP(req, h.trustProxy)).
-			Int("status", statusCode).
+			Int("responseCode", statusCode).
 			Dur("duration", time.Since(start)).
 			Msg(msg)
 	})
