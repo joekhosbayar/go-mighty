@@ -35,6 +35,29 @@ Three, all discovered while reading the code to write this plan.
 2. **Two outcome values added beyond the spec's list.** `mighty.ws.handshake` gains `auth_unavailable` (a Cognito/JWKS outage) and `upgrade_failed`. Conflating a dependency outage with bad credentials is a real diagnostic loss, and both are bounded values.
 3. **WebSocket routes are excluded from `otelhttp` entirely.** `otelhttp`'s response-writer wrapper does not reliably implement `http.Hijacker`, which `gorilla/websocket` requires for the upgrade. Wrapping WS routes risks breaking every WebSocket. Task 9 adds a regression test asserting the upgrade still succeeds through the full middleware chain.
 
+## Corrections Applied During Execution
+
+Seven defects were found in this plan while executing it, plus one found while
+answering a question afterwards. All are corrected in the text above. Recorded
+here because the pattern is instructive: **every one was in a passage written
+from memory of an API or a file, rather than transcribed from the actual
+source.** Passages copied from files that had been read were clean throughout.
+
+| # | Defect | Consequence had it shipped |
+|---|---|---|
+| 1 | `obs.Log` specified to return `zerolog.Logger` by value | Chained `obs.Log(ctx).Warn()` cannot compile — zerolog's methods have pointer receivers |
+| 2 | `LoggingMiddleware` rewrite renamed `responseCode`→`status` and dropped the 3xx/1xx switch cases | Broken log queries; two status classes silently unlogged |
+| 3 | Handshake metric test had `kind` and `outcome` co-varying | Test passed against an implementation that dropped the `kind` attribute entirely |
+| 4 | `inMsg.Type` — raw client JSON — passed as a metric label | **Any authenticated client could exhaust the 10k free-tier series budget, after which Grafana silently drops data** |
+| 5 | Double-count guard used `websocket.ErrBadHandshake` | Client-side sentinel; server `Upgrade` never returns it, so the guard was dead code and every origin rejection counted twice — inflating the metric behind the handshake-failure alert |
+| 6 | `otelhttp.WithRouteTag` | Does not exist in otelhttp v0.69.0; `http.route` is derived from `http.Request.Pattern` automatically |
+| 7 | Task 11 Step 6 assumed origin rejection was undetectable post-upgrade | Stale after defect #5's fix; would have made the span and the metric disagree about why a handshake failed |
+| 8 | Task 1 Step 5 declared Grafana params as Terraform `data` sources | **Would have written the Grafana access token in plaintext into local unencrypted `terraform.tfstate`, for no consumer** |
+
+Defects 4, 5 and 8 would have reached production silently. None was caught by
+a test; 4 and 8 were caught by asking "where does this value come from?" and
+"who actually reads this?" at dispatch time.
+
 ## File Structure
 
 | Path | Responsibility |
@@ -58,7 +81,7 @@ Three, all discovered while reading the code to write this plan.
 | `deploy/compose/docker-compose.prod.yml` | `alloy` service. |
 | `docker-compose.yml` | Opt-in `observability` profile for local dev. |
 | `deploy/compose/remote-deploy.sh` | Fetch new SSM params into `.env`. |
-| `deploy/terraform/ssm.tf` | Declare the 7 new SSM parameters. |
+| `deploy/terraform/ssm.tf` | **Unchanged** — the Grafana parameters are deliberately NOT declared in Terraform (see Task 1 Step 5). |
 | `deploy/terraform/grafana.tf` | Provider, folder, contact point, notification policy, alert rules. |
 | `deploy/terraform/variables.tf` | New Grafana/Discord variables. |
 | `deploy/grafana/dashboards/*.json` | Exported dashboard artifacts. |
@@ -73,9 +96,9 @@ Three, all discovered while reading the code to write this plan.
 Nothing downstream can be verified without real credentials. This task ends with secrets in SSM and OpenTofu able to reference them.
 
 **Files:**
-- Modify: `deploy/terraform/ssm.tf`
 - Modify: `deploy/terraform/variables.tf`
 - Modify: `deploy/terraform/terraform.tfvars.example`
+- **Not** `deploy/terraform/ssm.tf` — see Step 5.
 
 **Interfaces:**
 - Produces: SSM parameters `/mighty/grafana/{otlp_endpoint,otlp_instance_id,prom_url,prom_user_id,loki_url,loki_user_id,token}`; OpenTofu variables `grafana_url`, `grafana_sa_token`, `discord_webhook_url`, `prom_datasource_uid`.
@@ -126,31 +149,19 @@ aws ssm get-parameters-by-path --region us-east-1 \
 ```
 Expected: all seven names listed.
 
-- [ ] **Step 5: Declare the parameters in OpenTofu**
+- [ ] **Step 5: Do NOT declare the Grafana parameters in OpenTofu**
 
-Append to `deploy/terraform/ssm.tf`. These are `data` sources, not `resource`s — the values were written out-of-band in Step 3 so the token never lands in state as a managed attribute.
+**Deliberately empty step. Add nothing to `deploy/terraform/ssm.tf`.**
 
-```hcl
-# Grafana Cloud endpoints and credentials. Values are written out of band
-# (see docs/OBSERVABILITY.md) so the access token is never a managed
-# attribute in tfstate, which is stored unencrypted on the operator's laptop.
-locals {
-  grafana_param_names = [
-    "otlp_endpoint",
-    "otlp_instance_id",
-    "prom_url",
-    "prom_user_id",
-    "loki_url",
-    "loki_user_id",
-    "token",
-  ]
-}
+An earlier draft of this plan told you to append a `data "aws_ssm_parameter" "grafana"` block here, with a comment claiming that using a `data` source rather than a `resource` keeps the access token out of state. **That reasoning is wrong and the block is a credential leak.**
 
-data "aws_ssm_parameter" "grafana" {
-  for_each = toset(local.grafana_param_names)
-  name     = "/mighty/grafana/${each.key}"
-}
-```
+Terraform stores the results of **data sources** in state, in plaintext, exactly as it stores managed resources. `deploy/terraform/terraform.tfstate` in this project is local and unencrypted. So that block would have written your Grafana access-policy token — the one with `metrics:write, logs:write, traces:write` — into a plaintext file on the operator's laptop, in service of nothing.
+
+In service of nothing, precisely: **no Terraform resource in this plan ever references those data sources.** They were purely declarative. The only consumer of these parameters is `remote-deploy.sh`, which reads them straight from SSM on the box at deploy time (Task 2, Step 3) using the instance role. Terraform has no reason to see them at all.
+
+The general rule this violated, worth remembering beyond this plan: *a secret should be read by exactly the thing that uses it, as late as possible.* Routing it through a tool that only passes it along adds a copy at rest and buys nothing.
+
+If you have already applied a version of this block, the token is in your state file. Remove the block, then either rotate the Grafana token or scrub the state (`tofu state rm` does not remove historical copies — check `terraform.tfstate.backup` too).
 
 - [ ] **Step 6: Add the OpenTofu variables**
 
@@ -189,12 +200,12 @@ Append the same four keys with placeholder values to `deploy/terraform/terraform
 - [ ] **Step 8: Verify OpenTofu still plans cleanly**
 
 Run: `cd deploy/terraform && tofu init && tofu plan`
-Expected: plan succeeds, reads the seven data sources, and proposes **no changes** to existing resources. If it proposes changes to `aws_instance.api` or any alarm, stop — something else drifted and must be resolved before continuing.
+Expected: plan succeeds and proposes **no changes** to existing resources. If it proposes changes to `aws_instance.api` or any alarm, stop — something else drifted and must be resolved before continuing.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add deploy/terraform/ssm.tf deploy/terraform/variables.tf deploy/terraform/terraform.tfvars.example
+git add deploy/terraform/variables.tf deploy/terraform/terraform.tfvars.example
 git commit -m "feat(obs): declare Grafana Cloud SSM parameters and OpenTofu variables"
 ```
 
