@@ -56,13 +56,19 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			sendError(hsCtx, "auth timed out")
+			// Record the outcome before telling the client: sendError puts
+			// the close frame on the wire, and a client that observes that
+			// frame is not proof the server is done - see drainToCloseError
+			// in ws_hardening_test.go. Recording first is also simply the
+			// correct production order: the metric should reflect what the
+			// server decided, not what the client happened to observe.
 			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthTimeout)
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthTimeout)
+			sendError(hsCtx, "auth timed out")
 		} else {
-			sendError(hsCtx, "failed to read auth message")
 			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthFailed)
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+			sendError(hsCtx, "failed to read auth message")
 		}
 		return
 	}
@@ -72,9 +78,9 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(authMessage, &authReq); err != nil || authReq.Type != "AUTH" {
-		sendError(hsCtx, "expected AUTH message")
 		h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthFailed)
 		obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+		sendError(hsCtx, "expected AUTH message")
 
 		return
 	}
@@ -82,13 +88,13 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authSvc.ValidateToken(r.Context(), authReq.Token)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
-			sendError(hsCtx, "unauthorized")
 			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthFailed)
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+			sendError(hsCtx, "unauthorized")
 		} else {
-			sendError(hsCtx, "auth unavailable")
 			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthUnavailable)
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthUnavailable)
+			sendError(hsCtx, "auth unavailable")
 		}
 		return
 	}

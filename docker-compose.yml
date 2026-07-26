@@ -17,6 +17,7 @@ services:
       AWS_PROFILE: "${AWS_PROFILE:-}"
       AWS_REGION: "${AWS_REGION:-us-east-1}"
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      MIGHTY_ENV: "dev"
     secrets:
       - postgres_password
     volumes:

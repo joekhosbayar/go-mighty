@@ -179,13 +179,19 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			sendError(hsCtx, "auth timed out")
+			// Record the outcome before telling the client: sendError puts
+			// the close frame on the wire, and a client that observes that
+			// frame is not proof the server is done - see drainToCloseError
+			// in ws_hardening_test.go. Recording first is also simply the
+			// correct production order: the metric should reflect what the
+			// server decided, not what the client happened to observe.
 			h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthTimeout)
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthTimeout)
+			sendError(hsCtx, "auth timed out")
 		} else {
-			sendError(hsCtx, "failed to read auth message")
 			h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthFailed)
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+			sendError(hsCtx, "failed to read auth message")
 		}
 
 		obs.Log(hsCtx).Error().Str("game_id", gameID).Err(err).Msg("Failed to read auth message or timed out")
@@ -198,9 +204,9 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(authMessage, &authReq); err != nil || authReq.Type != "AUTH" {
-		sendError(hsCtx, "expected AUTH message")
 		h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthFailed)
 		obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+		sendError(hsCtx, "expected AUTH message")
 
 		return
 	}
@@ -208,13 +214,13 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authSvc.ValidateToken(r.Context(), authReq.Token)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
-			sendError(hsCtx, "unauthorized")
 			h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthFailed)
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+			sendError(hsCtx, "unauthorized")
 		} else {
-			sendError(hsCtx, "auth unavailable")
 			h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthUnavailable)
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthUnavailable)
+			sendError(hsCtx, "auth unavailable")
 		}
 
 		return
@@ -348,13 +354,21 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		// hours. Ended explicitly on every exit path below - never deferred,
 		// which inside this loop would hold every message's span open until
 		// the socket closes.
-		msgCtx, msgSpan := obs.StartWSMessageSpan(r.Context(), inMsg.Type, gameID, claims.UserID, connID)
+		//
+		// The span NAME is built from the sanitized label, not inMsg.Type
+		// directly: inMsg.Type is unbounded attacker-controlled JSON (up to
+		// maxWSMessageBytes), and Grafana Cloud's span-metrics generator
+		// turns span_name into a metric series by default, so an unbounded
+		// name would reopen the same cardinality hole wsMessageTypeLabel was
+		// written to close for the mighty.ws.messages metric below.
+		msgTypeLabel := wsMessageTypeLabel(inMsg.Type)
+		msgCtx, msgSpan := obs.StartWSMessageSpan(r.Context(), msgTypeLabel, gameID, claims.UserID, connID)
 
 		if inMsg.Type == WSMessageTypeMove {
 			convertedPayload, err := ConvertPayload(inMsg.MoveType, inMsg.Payload)
 			if err != nil {
 				sendError(msgCtx, "invalid payload structure: "+err.Error())
-				h.metrics.RecordWSMessage(r.Context(), wsMessageTypeLabel(inMsg.Type), obs.MsgInvalid)
+				h.metrics.RecordWSMessage(r.Context(), msgTypeLabel, obs.MsgInvalid)
 				msgSpan.RecordError(err)
 				msgSpan.SetStatus(codes.Error, err.Error())
 				msgSpan.End()
@@ -362,7 +376,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			h.metrics.RecordWSMessage(r.Context(), wsMessageTypeLabel(inMsg.Type), obs.MsgAccepted)
+			h.metrics.RecordWSMessage(r.Context(), msgTypeLabel, obs.MsgAccepted)
 
 			_, err = h.svc.ProcessMove(msgCtx, gameID, claims.UserID, inMsg.MoveType, convertedPayload, inMsg.ClientVersion)
 			if err != nil {
@@ -375,6 +389,13 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			// On success, the GameService publishes an event via Redis,
 			// which the write loop will pick up and send to all connected clients.
+		} else {
+			// Non-MOVE frames (e.g. a client-sent "ERROR" echo or anything
+			// else that parses as JSON) still reach here and are still
+			// accepted traffic - record them so mighty.ws.messages counts
+			// what its name says instead of undercounting to "accepted
+			// moves only".
+			h.metrics.RecordWSMessage(r.Context(), msgTypeLabel, obs.MsgAccepted)
 		}
 
 		msgSpan.End()

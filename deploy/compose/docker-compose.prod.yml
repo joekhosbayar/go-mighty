@@ -27,12 +27,19 @@ services:
     image: ${ECR_IMAGE}
     restart: unless-stopped
     env_file: .env
+    # NOTE: this used to also depend on an `alloy` service (condition:
+    # service_started) for the Alloy/Grafana Cloud collector this stack sends
+    # telemetry to. That service definition does not exist in this file yet -
+    # it belongs to a pending task. Referencing a non-existent service is a
+    # compose PARSE ERROR (not a soft/missing dependency), which aborts
+    # `docker compose pull` under `set -euo pipefail` in remote-deploy.sh, so
+    # the entry was removed rather than merged broken. Whoever lands the
+    # Alloy task MUST add both the `alloy` service definition AND restore this
+    # `depends_on: alloy: condition: service_started` entry.
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
-        condition: service_started
-      alloy:
         condition: service_started
     logging:
       driver: "json-file"

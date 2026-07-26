@@ -43,14 +43,26 @@ func NewStore(connStr string) (*Store, error) {
 		return nil, err
 	}
 
+	// Ping before registering the stats callback: main.go retries NewStore up
+	// to 30 times on a cold boot, and RegisterDBStatsMetrics attaches an
+	// observable callback that holds this *sql.DB alive for as long as it
+	// stays registered. Registering before a successful Ping would leave one
+	// live callback per failed attempt - e.g. ~20 of them on a 20s-late
+	// Postgres - all reporting db.sql.connection.open under an identical
+	// attribute set, so the SDK collapses them into duplicate measurements
+	// and the pool-pressure signal below becomes wrong instead of just slow.
+	if err := db.PingContext(context.Background()); err != nil {
+		_ = db.Close()
+
+		return nil, err
+	}
+
 	// Pool stats: open, idle, and crucially WAITING connections, which are
 	// the earliest honest signal of pool pressure and back the Postgres
 	// saturation alert.
 	if _, err := otelsql.RegisterDBStatsMetrics(db, otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL)); err != nil {
-		return nil, err
-	}
+		_ = db.Close()
 
-	if err := db.PingContext(context.Background()); err != nil {
 		return nil, err
 	}
 

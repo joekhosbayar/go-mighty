@@ -62,6 +62,33 @@ func flushTelemetry(p *obs.Provider) {
 	}
 }
 
+// fatalAfterObsInit logs a fatal startup error and exits after flushing
+// telemetry. log.Fatalf calls os.Exit directly, which skips every deferred
+// function including the flushTelemetry safety net - a bare log.Fatalf for a
+// failure that happens after obsProvider is already up would silently drop
+// whatever telemetry had buffered by that point. Use this (not log.Fatalf)
+// for any fatal failure once obsProvider exists.
+func fatalAfterObsInit(obsProvider *obs.Provider, format string, args ...any) {
+	zlog.Error().Msgf(format, args...)
+	flushTelemetry(obsProvider)
+	os.Exit(1)
+}
+
+// fatalWithCleanup is fatalAfterObsInit plus closing the rate-limiter Redis
+// client - the identical cleanup the SIGTERM/SIGINT handler and the
+// ListenAndServe error path already perform. Use this for any fatal startup
+// failure once rlClient exists: a bare log.Fatalf there would leak the pool
+// in addition to dropping telemetry, which is exactly the problem the
+// SIGTERM goroutine exists to solve.
+func fatalWithCleanup(rlClient *goredis.Client, obsProvider *obs.Provider, format string, args ...any) {
+	zlog.Error().Msgf(format, args...)
+
+	_ = rlClient.Close()
+
+	flushTelemetry(obsProvider)
+	os.Exit(1)
+}
+
 func main() {
 	// 0. Logging Config
 	logLevel := os.Getenv("LOG_LEVEL")
@@ -97,7 +124,7 @@ func main() {
 
 	metrics, err := obs.NewMetrics(obsProvider.Meter)
 	if err != nil {
-		log.Fatalf("observability metrics: %v", err)
+		fatalAfterObsInit(obsProvider, "observability metrics: %v", err)
 	}
 
 	// Go runtime metrics (goroutines, heap, GC pause) — the difference
@@ -133,7 +160,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatalf("Failed to connect to Postgres after 30 attempts: %v", err)
+		fatalAfterObsInit(obsProvider, "Failed to connect to Postgres after 30 attempts: %v", err)
 	}
 
 	redisStore := redis.NewStore(redisAddr)
@@ -149,7 +176,12 @@ func main() {
 		zlog.Warn().Err(instrErr).Msg("rate limiter redis tracing unavailable")
 	}
 
-	if instrErr := redisotel.InstrumentMetrics(rlClient); instrErr != nil {
+	// WithPoolName is required here: redisotel derives pool.name from the
+	// address by default, and the game store's client (internal/store/redis)
+	// connects to the same redisAddr. Without an explicit name both clients
+	// would report db.client.connections.usage under one
+	// pool.name="host:port" series, silently discarding one pool's stats.
+	if instrErr := redisotel.InstrumentMetrics(rlClient, redisotel.WithPoolName("ratelimit")); instrErr != nil {
 		zlog.Warn().Err(instrErr).Msg("rate limiter redis metrics unavailable")
 	}
 
@@ -184,7 +216,7 @@ func main() {
 	cognitoClientID := os.Getenv("COGNITO_CLIENT_ID")
 
 	if cognitoPoolID == "" || cognitoClientID == "" {
-		log.Fatalf("COGNITO_POOL_ID and COGNITO_CLIENT_ID must be set")
+		fatalWithCleanup(rlClient, obsProvider, "COGNITO_POOL_ID and COGNITO_CLIENT_ID must be set")
 	}
 
 	cognitoRegion := os.Getenv("COGNITO_REGION")
@@ -196,12 +228,12 @@ func main() {
 
 	fetcher, err := infra.NewCognitoAttributesFetcher(ctx, cognitoRegion, cognitoPoolID)
 	if err != nil {
-		log.Fatalf("cognito attributes fetcher: %v", err)
+		fatalWithCleanup(rlClient, obsProvider, "cognito attributes fetcher: %v", err)
 	}
 
 	authSvc, err := service.NewCognitoAuth(ctx, pgStore, fetcher, issuer, cognitoClientID)
 	if err != nil {
-		log.Fatalf("cognito auth: %v", err)
+		fatalWithCleanup(rlClient, obsProvider, "cognito auth: %v", err)
 	}
 
 	// Comma-separated, e.g. "https://themighty.gg,https://www.themighty.gg".

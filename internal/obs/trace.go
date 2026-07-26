@@ -23,6 +23,12 @@ func Tracer() trace.Tracer {
 // connection-scoped span: a connection span would stay open for an entire
 // game, which is unusable in Tempo and holds SDK memory for hours.
 //
+// msgType MUST already be the sanitized, bounded label (e.g. the caller's
+// wsMessageTypeLabel), never the raw client-supplied value: Grafana Cloud's
+// span-metrics generator turns span_name into a metric series by default, so
+// an unbounded name reopens the exact cardinality hole the label sanitizer
+// was written to close.
+//
 // game_id, user_id and conn_id are span attributes. They must never become
 // metric labels - see the cardinality guard in metrics_test.go.
 func StartWSMessageSpan(ctx context.Context, msgType, gameID, userID, connID string) (context.Context, trace.Span) {
