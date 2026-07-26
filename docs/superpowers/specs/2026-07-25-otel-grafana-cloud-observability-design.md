@@ -116,7 +116,7 @@ it along adds a copy at rest and buys nothing.
 | `deploy/compose/alloy/config.alloy` | New Alloy configuration |
 | `deploy/compose/docker-compose.prod.yml` | Add `alloy` service with `mem_limit` |
 | `deploy/compose/remote-deploy.sh` | Fetch the seven new SSM values into `.env` |
-| `deploy/terraform/ssm.tf` | Declare the new parameters |
+| `deploy/terraform/ssm.tf` | **Unchanged** — the Grafana parameters are deliberately not declared in Terraform (see Credentials above) |
 | `deploy/terraform/grafana.tf` | New: Grafana provider, contact point, notification policy, alert rules |
 | `deploy/grafana/dashboards/*.json` | Exported dashboard artifacts, committed |
 
