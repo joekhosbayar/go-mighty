@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/api"
@@ -32,6 +34,32 @@ const (
 	connsPerUser     = 3
 	connsPerIP       = 20
 )
+
+// flushTelemetry is the entire extent of this process's shutdown behavior:
+// it flushes any spans/metrics buffered since the last export, within a
+// bounded timeout, and returns. It deliberately does NOT call srv.Shutdown
+// and does NOT drain in-flight connections — WebSocket connections are
+// long-lived, and deciding whether an in-progress game gets cut off or
+// waited on is a gameplay decision, not an observability one, and is out of
+// scope here. Sockets die exactly as they do today; the only behavior this
+// adds is that telemetry gets a chance to reach the collector on the way
+// out, instead of being silently dropped by an unconditional os.Exit.
+//
+// Safe to call with p == nil (defensive) or a disabled provider (the
+// unconfigured local-dev default, when OTEL_EXPORTER_OTLP_ENDPOINT is
+// unset) — neither panics nor blocks.
+func flushTelemetry(p *obs.Provider) {
+	if p == nil {
+		return
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := p.Shutdown(shutdownCtx); err != nil {
+		zlog.Warn().Err(err).Msg("observability shutdown")
+	}
+}
 
 func main() {
 	// 0. Logging Config
@@ -60,14 +88,11 @@ func main() {
 		log.Fatalf("observability init: %v", err)
 	}
 
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if shutdownErr := obsProvider.Shutdown(shutdownCtx); shutdownErr != nil {
-			zlog.Warn().Err(shutdownErr).Msg("observability shutdown")
-		}
-	}()
+	// Fallback safety net for any exit path that unwinds normally (e.g. an
+	// unrecovered panic) rather than through the explicit SIGTERM/SIGINT and
+	// ListenAndServe-error paths below, both of which call flushTelemetry
+	// directly because log.Fatal/os.Exit skip deferred functions entirely.
+	defer flushTelemetry(obsProvider)
 
 	metrics, err := obs.NewMetrics(obsProvider.Meter)
 	if err != nil {
@@ -116,7 +141,27 @@ func main() {
 	// to that package, and one extra small pool is cheaper than widening its
 	// API surface.
 	rlClient := goredis.NewClient(&goredis.Options{Addr: redisAddr})
-	defer func() { _ = rlClient.Close() }()
+
+	// SIGTERM (docker compose stop / a redeploy) and SIGINT (Ctrl-C locally)
+	// trigger a flush-only shutdown, same rules as flushTelemetry above: no
+	// srv.Shutdown, no connection draining, just telemetry flush + closing
+	// the rate-limiter's Redis client (which has the identical
+	// never-runs-on-log.Fatal problem a plain defer would have) before the
+	// process exits.
+	sigCtx, stopSignalWatch := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stopSignalWatch()
+
+	go func() {
+		<-sigCtx.Done()
+
+		zlog.Info().Msg("received SIGTERM/SIGINT: flushing telemetry only; WebSocket connections are not drained")
+
+		_ = rlClient.Close()
+
+		flushTelemetry(obsProvider)
+
+		os.Exit(0)
+	}()
 
 	limiter := ratelimit.New(rlClient)
 
@@ -249,6 +294,12 @@ func main() {
 	}
 
 	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
+		zlog.Error().Err(err).Msg("server stopped")
+
+		_ = rlClient.Close()
+
+		flushTelemetry(obsProvider)
+
+		os.Exit(1)
 	}
 }
