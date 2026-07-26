@@ -27,14 +27,17 @@ func NewStoreWithDB(db *sql.DB) *Store {
 // NewStore creates a new Store instance by opening a connection to PostgreSQL
 // using the provided connection string.
 func NewStore(connStr string) (*Store, error) {
-	// otelsql.DisableErrSkip: one span per query is enough; a span per
-	// Rows.Next would multiply trace volume by the row count for no
-	// diagnostic gain. (RowsNext and the other span-per-row toggle default
-	// to false already, so no separate "omit rows" option is needed here.)
+	// One span per query is enough: OmitRows suppresses the extra "sql.rows"
+	// span otelsql would otherwise open per row-returning query (covering
+	// cursor open->close), and RowsNext (left at its default false) is what
+	// would additionally add a span per Rows.Next call. Neither multiplies
+	// spans by row count on its own, but together they'd double- and
+	// over-instrument every SELECT for no diagnostic gain.
 	db, err := otelsql.Open("postgres", connStr,
 		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
 		otelsql.WithSpanOptions(otelsql.SpanOptions{
 			DisableErrSkip: true,
+			OmitRows:       true,
 		}))
 	if err != nil {
 		return nil, err

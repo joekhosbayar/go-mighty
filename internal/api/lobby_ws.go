@@ -12,7 +12,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/service"
-	"github.com/rs/zerolog/log"
 )
 
 // LobbyWSHandler handles websocket connections for the global lobby feed.
@@ -25,7 +24,7 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to upgrade lobby websocket")
+		obs.Log(hsCtx).Error().Err(err).Msg("Failed to upgrade lobby websocket")
 
 		outcome := obs.OutcomeUpgradeFailed
 		if originRejected {

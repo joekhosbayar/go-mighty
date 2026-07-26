@@ -138,7 +138,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
+		obs.Log(hsCtx).Error().Str("game_id", gameID).Err(err).Msg("Failed to upgrade websocket")
 
 		outcome := obs.OutcomeUpgradeFailed
 		if originRejected {
@@ -188,7 +188,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
 		}
 
-		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to read auth message or timed out")
+		obs.Log(hsCtx).Error().Str("game_id", gameID).Err(err).Msg("Failed to read auth message or timed out")
 
 		return
 	}
@@ -223,7 +223,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	if h.conns != nil {
 		release, connErr := h.conns.acquire(claims.UserID, ClientIP(r, h.trustProxy))
 		if connErr != nil {
-			log.Warn().
+			obs.Log(hsCtx).Warn().
 				Str("game_id", gameID).
 				Str("user_id", claims.UserID).
 				Err(connErr).
