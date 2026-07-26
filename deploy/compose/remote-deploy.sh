@@ -5,6 +5,7 @@ cd /opt/mighty
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_HOST="${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com"
+ECR_IMAGE="${ECR_HOST}/mighty:latest"
 
 param() {
 	aws ssm get-parameter --name "$1" --with-decryption \
@@ -15,7 +16,7 @@ PGPW=$(param /mighty/postgres_password)
 
 umask 077
 cat > .env <<EOF
-ECR_IMAGE=${ECR_HOST}/mighty:latest
+ECR_IMAGE=${ECR_IMAGE}
 CADDY_IMAGE=${ECR_HOST}/mighty-caddy:latest
 POSTGRES_PASSWORD=${PGPW}
 POSTGRES_CONN=postgres://postgres:${PGPW}@postgres:5432/postgres?sslmode=disable
