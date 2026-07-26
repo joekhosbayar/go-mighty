@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/XSAM/otelsql"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	_ "github.com/lib/pq" // Import the postgres driver for database/sql.
 	"github.com/rs/zerolog/log"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
 // Store implements the storage interface for PostgreSQL.
@@ -25,8 +27,23 @@ func NewStoreWithDB(db *sql.DB) *Store {
 // NewStore creates a new Store instance by opening a connection to PostgreSQL
 // using the provided connection string.
 func NewStore(connStr string) (*Store, error) {
-	db, err := sql.Open("postgres", connStr)
+	// otelsql.DisableErrSkip: one span per query is enough; a span per
+	// Rows.Next would multiply trace volume by the row count for no
+	// diagnostic gain. (RowsNext and the other span-per-row toggle default
+	// to false already, so no separate "omit rows" option is needed here.)
+	db, err := otelsql.Open("postgres", connStr,
+		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
+		otelsql.WithSpanOptions(otelsql.SpanOptions{
+			DisableErrSkip: true,
+		}))
 	if err != nil {
+		return nil, err
+	}
+
+	// Pool stats: open, idle, and crucially WAITING connections, which are
+	// the earliest honest signal of pool pressure and back the Postgres
+	// saturation alert.
+	if _, err := otelsql.RegisterDBStatsMetrics(db, otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL)); err != nil {
 		return nil, err
 	}
 

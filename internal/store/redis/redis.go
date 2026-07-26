@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 )
@@ -32,6 +33,17 @@ func NewStore(addr string) *Store {
 	client := redis.NewClient(&redis.Options{
 		Addr: addr,
 	})
+
+	// Errors here mean the hooks could not attach; the store is still usable,
+	// so degrade to uninstrumented rather than failing to boot. NewStore has
+	// no error return and adding one would churn every call site.
+	if err := redisotel.InstrumentTracing(client); err != nil {
+		log.Warn().Err(err).Msg("redis tracing unavailable")
+	}
+
+	if err := redisotel.InstrumentMetrics(client); err != nil {
+		log.Warn().Err(err).Msg("redis metrics unavailable")
+	}
 
 	return &Store{client: client}
 }

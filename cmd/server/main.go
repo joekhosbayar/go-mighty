@@ -18,6 +18,7 @@ import (
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	"github.com/joekhosbayar/go-mighty/internal/store/redis"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	zlog "github.com/rs/zerolog/log"
@@ -141,6 +142,16 @@ func main() {
 	// to that package, and one extra small pool is cheaper than widening its
 	// API surface.
 	rlClient := goredis.NewClient(&goredis.Options{Addr: redisAddr})
+
+	// Errors here mean the hooks could not attach; the client is still
+	// usable, so degrade to uninstrumented rather than failing to boot.
+	if instrErr := redisotel.InstrumentTracing(rlClient); instrErr != nil {
+		zlog.Warn().Err(instrErr).Msg("rate limiter redis tracing unavailable")
+	}
+
+	if instrErr := redisotel.InstrumentMetrics(rlClient); instrErr != nil {
+		zlog.Warn().Err(instrErr).Msg("rate limiter redis metrics unavailable")
+	}
 
 	// SIGTERM (docker compose stop / a redeploy) and SIGINT (Ctrl-C locally)
 	// trigger a flush-only shutdown, same rules as flushTelemetry above: no

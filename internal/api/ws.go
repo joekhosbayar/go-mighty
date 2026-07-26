@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -10,12 +11,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/ratelimit"
 	"github.com/joekhosbayar/go-mighty/internal/service"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/codes"
 )
 
 const (
@@ -127,6 +130,8 @@ type OutgoingWSError struct {
 func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("id")
 
+	hsCtx, hsSpan := obs.StartWSHandshakeSpan(r.Context(), obs.KindGame)
+
 	var originRejected bool
 
 	up := h.upgraderFor(&originRejected)
@@ -140,20 +145,29 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 			outcome = obs.OutcomeOriginRejected
 		}
 
-		h.metrics.RecordHandshake(r.Context(), obs.KindGame, outcome)
+		h.metrics.RecordHandshake(hsCtx, obs.KindGame, outcome)
+		obs.EndWSHandshakeSpan(hsSpan, outcome)
 
 		return
 	}
 	defer func() { _ = conn.Close() }()
 
+	// Generated once per socket so log lines and message spans for this
+	// connection can be correlated, without the connection itself ever
+	// becoming a span (see StartWSMessageSpan).
+	connID := uuid.NewString()
+
 	conn.SetReadLimit(maxWSMessageBytes)
 
 	var wsWriteMu sync.Mutex
 
-	sendError := func(errMsg string) {
-		log.Warn().Str("error", errMsg).Msg("Game websocket error")
+	// sendError takes the context of whatever span is active when the error
+	// occurs (hsCtx during the handshake, msgCtx while handling a frame) so
+	// the resulting log line carries that span's trace_id.
+	sendError := func(ctx context.Context, errMsg string) {
+		obs.Log(ctx).Warn().Str("error", errMsg).Msg("Game websocket error")
 		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
-			log.Warn().Str("game_id", gameID).Err(wsErr).Msg("Failed to send websocket error")
+			obs.Log(ctx).Warn().Str("game_id", gameID).Err(wsErr).Msg("Failed to send websocket error")
 		}
 		closeWithCode(conn, websocket.ClosePolicyViolation, errMsg, &wsWriteMu)
 	}
@@ -165,11 +179,13 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			sendError("auth timed out")
-			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthTimeout)
+			sendError(hsCtx, "auth timed out")
+			h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthTimeout)
+			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthTimeout)
 		} else {
-			sendError("failed to read auth message")
-			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthFailed)
+			sendError(hsCtx, "failed to read auth message")
+			h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthFailed)
+			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
 		}
 
 		log.Error().Str("game_id", gameID).Err(err).Msg("Failed to read auth message or timed out")
@@ -182,8 +198,9 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(authMessage, &authReq); err != nil || authReq.Type != "AUTH" {
-		sendError("expected AUTH message")
-		h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthFailed)
+		sendError(hsCtx, "expected AUTH message")
+		h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthFailed)
+		obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
 
 		return
 	}
@@ -191,11 +208,13 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authSvc.ValidateToken(r.Context(), authReq.Token)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
-			sendError("unauthorized")
-			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthFailed)
+			sendError(hsCtx, "unauthorized")
+			h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthFailed)
+			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
 		} else {
-			sendError("auth unavailable")
-			h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeAuthUnavailable)
+			sendError(hsCtx, "auth unavailable")
+			h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeAuthUnavailable)
+			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthUnavailable)
 		}
 
 		return
@@ -215,7 +234,8 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 				outcome = obs.OutcomeConnLimitUser
 			}
 
-			h.metrics.RecordHandshake(r.Context(), obs.KindGame, outcome)
+			h.metrics.RecordHandshake(hsCtx, obs.KindGame, outcome)
+			obs.EndWSHandshakeSpan(hsSpan, outcome)
 			closeWithCode(conn, websocket.CloseTryAgainLater, connErr.Error(), &wsWriteMu)
 
 			return
@@ -224,7 +244,8 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 		defer release()
 	}
 
-	h.metrics.RecordHandshake(r.Context(), obs.KindGame, obs.OutcomeOK)
+	h.metrics.RecordHandshake(hsCtx, obs.KindGame, obs.OutcomeOK)
+	obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeOK)
 	h.metrics.AddConnection(r.Context(), obs.KindGame, 1)
 
 	defer h.metrics.AddConnection(r.Context(), obs.KindGame, -1)
@@ -239,7 +260,7 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 	pubsub := h.svc.Subscribe(r.Context(), gameID)
 	if pubsub == nil {
-		sendError("websocket unavailable")
+		sendError(hsCtx, "websocket unavailable")
 		return
 	}
 	defer func() { _ = pubsub.Close() }()
@@ -313,31 +334,50 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 
 		var inMsg IncomingWSMessage
 		if err := json.Unmarshal(message, &inMsg); err != nil {
-			sendError("invalid message format")
+			// No message span here: a frame that cannot even be typed gets
+			// no per-message span, only a connection-scoped log line.
+			sendError(r.Context(), "invalid message format")
 			h.metrics.RecordWSMessage(r.Context(), obs.MsgTypeUnknown, obs.MsgInvalid)
 
 			continue
 		}
 
+		// A new ROOT span per inbound frame, not a child of any
+		// connection-scoped span: the connection lives for a whole game, and
+		// a span that long is unusable in Tempo and pins SDK memory for
+		// hours. Ended explicitly on every exit path below - never deferred,
+		// which inside this loop would hold every message's span open until
+		// the socket closes.
+		msgCtx, msgSpan := obs.StartWSMessageSpan(r.Context(), inMsg.Type, gameID, claims.UserID, connID)
+
 		if inMsg.Type == WSMessageTypeMove {
 			convertedPayload, err := ConvertPayload(inMsg.MoveType, inMsg.Payload)
 			if err != nil {
-				sendError("invalid payload structure: " + err.Error())
+				sendError(msgCtx, "invalid payload structure: "+err.Error())
 				h.metrics.RecordWSMessage(r.Context(), wsMessageTypeLabel(inMsg.Type), obs.MsgInvalid)
+				msgSpan.RecordError(err)
+				msgSpan.SetStatus(codes.Error, err.Error())
+				msgSpan.End()
 
 				continue
 			}
 
 			h.metrics.RecordWSMessage(r.Context(), wsMessageTypeLabel(inMsg.Type), obs.MsgAccepted)
 
-			_, err = h.svc.ProcessMove(r.Context(), gameID, claims.UserID, inMsg.MoveType, convertedPayload, inMsg.ClientVersion)
+			_, err = h.svc.ProcessMove(msgCtx, gameID, claims.UserID, inMsg.MoveType, convertedPayload, inMsg.ClientVersion)
 			if err != nil {
-				sendError(err.Error())
+				sendError(msgCtx, err.Error())
+				msgSpan.RecordError(err)
+				msgSpan.SetStatus(codes.Error, err.Error())
+				msgSpan.End()
+
 				continue
 			}
 			// On success, the GameService publishes an event via Redis,
 			// which the write loop will pick up and send to all connected clients.
 		}
+
+		msgSpan.End()
 	}
 
 	close(done)
