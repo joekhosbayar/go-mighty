@@ -27,25 +27,47 @@ services:
     image: ${ECR_IMAGE}
     restart: unless-stopped
     env_file: .env
-    # NOTE: this used to also depend on an `alloy` service (condition:
-    # service_started) for the Alloy/Grafana Cloud collector this stack sends
-    # telemetry to. That service definition does not exist in this file yet -
-    # it belongs to a pending task. Referencing a non-existent service is a
-    # compose PARSE ERROR (not a soft/missing dependency), which aborts
-    # `docker compose pull` under `set -euo pipefail` in remote-deploy.sh, so
-    # the entry was removed rather than merged broken. Whoever lands the
-    # Alloy task MUST add both the `alloy` service definition AND restore this
-    # `depends_on: alloy: condition: service_started` entry.
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
+        condition: service_started
+      alloy:
         condition: service_started
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Single telemetry egress path. The only container holding Grafana Cloud
+  # credentials; `mighty` exports to alloy:4317 and never learns the vendor
+  # exists. 4317 is deliberately NOT published to the host.
+  alloy:
+    image: grafana/alloy:v1.10.0
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=127.0.0.1:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    env_file: .env
+    # Hard ceiling on a 2GB box: worst case Alloy OOMs alone rather than
+    # taking Postgres with it.
+    mem_limit: 256m
+    pid: host
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - alloy_data:/var/lib/alloy/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   migrate:
     image: migrate/migrate:v4.19.1
@@ -82,3 +104,4 @@ volumes:
   caddy_config:
   postgres_data:
   redis_data:
+  alloy_data:
