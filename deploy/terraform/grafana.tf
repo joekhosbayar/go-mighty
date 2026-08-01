@@ -38,10 +38,25 @@ locals {
   # are staged to land in a later task, after the metrics backing them
   # exist — creating them now would fire immediately given
   # no_data_state = "Alerting" below.
+  #
+  # SEQUENCING: Alloy (deploy/compose/alloy) must already be deployed and
+  # confirmed scraping `job="mighty/host"` before this stack is `tofu
+  # apply`'d. no_data_state = "Alerting" is deliberate — a dead telemetry
+  # path should page — but it also means applying this before Alloy is up
+  # and scraped at least once pages you for your own install, not a real
+  # incident.
   critical_rules = {
     telemetry_blind = {
-      title   = "Telemetry blind - no host metrics"
-      expr    = "absent(node_memory_MemAvailable_bytes{job=\"mighty/host\"})"
+      title = "Telemetry blind - no host metrics"
+      # absent() alone does NOT give a 0/1 series: when metrics are healthy
+      # it returns an EMPTY vector (not 0), which Grafana treats as No Data
+      # -> Alerting given no_data_state below, so a naive absent() fires in
+      # both the healthy and blind states. count(...) * 0 collapses any
+      # number of series to a single label-less 0 when data exists; `or
+      # vector(1)` only contributes when the left side is empty (no
+      # series), giving a single label-less 1 when blind. Exactly one
+      # series, 0 or 1, in every state.
+      expr    = "(count(node_memory_MemAvailable_bytes{job=\"mighty/host\"}) * 0) or vector(1)"
       for     = "10m"
       summary = "No host metrics for 10m: Alloy or the box is gone. Every other alert is now unreliable. Check `docker ps` and Alloy logs over SSM."
     }
@@ -54,8 +69,13 @@ locals {
     }
 
     disk_filling = {
-      title   = "Disk filling"
-      expr    = "min(node_filesystem_avail_bytes{job=\"mighty/host\", mountpoint=\"/rootfs\"} / node_filesystem_size_bytes{job=\"mighty/host\", mountpoint=\"/rootfs\"}) < bool 0.15"
+      title = "Disk filling"
+      # mountpoint is "/" here, not "/rootfs": node_exporter's rootfs_path
+      # (set to /rootfs in config.alloy so the container can statfs() the
+      # host root from under /rootfs) is used only to redirect the syscall
+      # target — it is stripped from the exposed `mountpoint` label, which
+      # reports the real host path ("/").
+      expr    = "min(node_filesystem_avail_bytes{job=\"mighty/host\", mountpoint=\"/\"} / node_filesystem_size_bytes{job=\"mighty/host\", mountpoint=\"/\"}) < bool 0.15"
       for     = "15m"
       summary = "Under 15% free on the 20GB root volume. Usual cause is accumulated Docker images: run `docker image prune -f`."
     }
