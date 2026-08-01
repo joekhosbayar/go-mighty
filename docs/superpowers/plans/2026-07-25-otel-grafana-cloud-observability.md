@@ -53,10 +53,17 @@ source.** Passages copied from files that had been read were clean throughout.
 | 6 | `otelhttp.WithRouteTag` | Does not exist in otelhttp v0.69.0; `http.route` is derived from `http.Request.Pattern` automatically |
 | 7 | Task 11 Step 6 assumed origin rejection was undetectable post-upgrade | Stale after defect #5's fix; would have made the span and the metric disagree about why a handshake failed |
 | 8 | Task 1 Step 5 declared Grafana params as Terraform `data` sources | **Would have written the Grafana access token in plaintext into local unencrypted `terraform.tfstate`, for no consumer** |
+| 9 | `telemetry_blind` used bare `absent()` | `absent()` returns an empty vector when data exists → No Data → **Alerting**. The rule meant to detect a dead collector would have fired permanently in both states |
+| 10 | `disk_filling` filtered `mountpoint="/rootfs"` | node_exporter strips `rootfs_path` from the label; real value is `/`. Matched zero series → permanent No Data → **permanent alerting** |
 
-Defects 4, 5 and 8 would have reached production silently. None was caught by
-a test; 4 and 8 were caught by asking "where does this value come from?" and
-"who actually reads this?" at dispatch time.
+Defects 4, 5 and 8 would have reached production silently. Defects 9 and 10
+would have been loudly wrong instead — two of the three launch alerts firing
+into Discord on install and never clearing, which is the failure mode most
+likely to get a monitoring channel muted for good.
+
+None was caught by a test. The questions that did catch them were: "where does
+this value come from?" (4), "who actually reads this?" (8), and "can this
+expression return zero series?" (9, 10).
 
 ## File Structure
 
@@ -600,7 +607,20 @@ resource "grafana_notification_policy" "root" {
 
 Append to `deploy/terraform/grafana.tf`.
 
-Every expression uses PromQL's `bool` modifier so it returns `0` or `1` rather than filtering series away. That means one uniform threshold condition (`> 0`) works for all rules, and absence of data genuinely means the telemetry path is broken — which is why `no_data_state` is `Alerting` everywhere.
+Every expression must return **exactly one series valued 0 or 1, in every
+state**. Use the `bool` modifier on comparisons; do not use bare `absent()`.
+
+This is not stylistic. With `no_data_state = "Alerting"`, an expression that
+returns *no series* is indistinguishable from an emergency — so any rule with
+a no-series state fires on install and never clears, which trains the operator
+to mute the channel. Before adding a rule, walk both states and ask: **can
+this return zero series?**
+
+Two traps this plan hit:
+- `absent(v)` returns an empty vector when `v` HAS series (it returns 1 only
+  when `v` matches nothing). Use `(count(v) * 0) or vector(1)` instead.
+- node_exporter strips `rootfs_path` from the exposed `mountpoint` label, so a
+  host root bind-mounted at `/rootfs` is still labelled `mountpoint="/"`. That means one uniform threshold condition (`> 0`) works for all rules, and absence of data genuinely means the telemetry path is broken — which is why `no_data_state` is `Alerting` everywhere.
 
 ```hcl
 locals {
@@ -609,7 +629,11 @@ locals {
   critical_rules = {
     telemetry_blind = {
       title   = "Telemetry blind - no host metrics"
-      expr    = "absent(node_memory_MemAvailable_bytes{job=\"mighty/host\"})"
+      # NOT absent(): absent(v) returns an EMPTY vector when v has series, not
+      # 0. Empty -> No Data -> Alerting, so the healthy state would page and
+      # never clear. count() collapses to one label-less series, and `or`
+      # suppresses vector(1) because the label sets match.
+      expr    = "(count(node_memory_MemAvailable_bytes{job=\"mighty/host\"}) * 0) or vector(1)"
       for     = "10m"
       summary = "No host metrics for 10m: Alloy or the box is gone. Every other alert is now unreliable. Check `docker ps` and Alloy logs over SSM."
     }
@@ -623,7 +647,7 @@ locals {
 
     disk_filling = {
       title   = "Disk filling"
-      expr    = "min(node_filesystem_avail_bytes{job=\"mighty/host\", mountpoint=\"/rootfs\"} / node_filesystem_size_bytes{job=\"mighty/host\", mountpoint=\"/rootfs\"}) < bool 0.15"
+      expr    = "min(node_filesystem_avail_bytes{job=\"mighty/host\", mountpoint=\"/\"} / node_filesystem_size_bytes{job=\"mighty/host\", mountpoint=\"/\"}) < bool 0.15"
       for     = "15m"
       summary = "Under 15% free on the 20GB root volume. Usual cause is accumulated Docker images: run `docker image prune -f`."
     }
