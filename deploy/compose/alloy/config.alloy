@@ -31,7 +31,7 @@ prometheus.remote_write "grafana_cloud" {
   // observability must not become the outage.
   wal {
     truncate_frequency  = "30m"
-    max_keep_alive_time = "2h"
+    max_keepalive_time  = "2h"
   }
 }
 

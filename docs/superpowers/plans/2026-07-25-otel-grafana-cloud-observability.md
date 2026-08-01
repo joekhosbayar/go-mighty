@@ -55,6 +55,8 @@ source.** Passages copied from files that had been read were clean throughout.
 | 8 | Task 1 Step 5 declared Grafana params as Terraform `data` sources | **Would have written the Grafana access token in plaintext into local unencrypted `terraform.tfstate`, for no consumer** |
 | 9 | `telemetry_blind` used bare `absent()` | `absent()` returns an empty vector when data exists → No Data → **Alerting**. The rule meant to detect a dead collector would have fired permanently in both states |
 | 10 | `disk_filling` filtered `mountpoint="/rootfs"` | node_exporter strips `rootfs_path` from the label; real value is `/`. Matched zero series → permanent No Data → **permanent alerting** |
+| 11 | `wal { max_keep_alive_time }` in `config.alloy` | Not a valid attribute — it is `max_keepalive_time` (one word). Alloy refused to start and crash-looped on the box |
+| 12 | Step 4 validated with `alloy fmt` | `fmt` checks syntax only and **passes** an invalid attribute name. The plan's own safety net had a hole, which is how #11 reached production. Now uses `alloy validate` |
 
 Defects 4, 5 and 8 would have reached production silently. Defects 9 and 10
 would have been loudly wrong instead — two of the three launch alerts firing
@@ -267,7 +269,7 @@ prometheus.remote_write "grafana_cloud" {
   // observability must not become the outage.
   wal {
     truncate_frequency  = "30m"
-    max_keep_alive_time = "2h"
+    max_keepalive_time  = "2h"
   }
 }
 
@@ -495,14 +497,31 @@ MIGHTY_ENV=prod
 
 `POSTGRES_CONN` is already written by this heredoc (Task 4 needs it for the Postgres exporter) and `umask 077` already protects the file, so no other changes are required here.
 
-- [ ] **Step 4: Validate the Alloy config syntactically before deploying**
+- [ ] **Step 4: Validate the Alloy config before deploying**
 
-Run locally (no credentials needed — `fmt` only parses):
+Use `validate`, **not `fmt`**. `fmt` only checks River *syntax* — it happily
+accepts a well-formed attribute whose name does not exist on the component,
+which is exactly how a bad config reaches the box and crash-loops there.
+`validate` resolves the component schema and catches it.
+
 ```bash
-docker run --rm -v "$PWD/deploy/compose/alloy:/cfg" \
-  grafana/alloy:v1.10.0 fmt /cfg/config.alloy
+docker run --rm -v "$PWD/deploy/compose/alloy:/cfg" grafana/alloy:v1.10.0 validate /cfg/config.alloy
 ```
-Expected: the formatted config prints with exit code 0. A syntax error prints a line number and exits non-zero. Fix and re-run until clean.
+
+Expected: **no output, exit 0.** A schema error prints the offending line with
+a caret and exits non-zero — for example:
+
+```
+34 |     max_keep_alive_time = "2h"
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: validation failed
+```
+
+(This is not hypothetical: that exact error shipped to production because an
+earlier version of this step used `fmt`. `fmt` passed it.)
+
+Note the command is a single line — a `\`-continued version loses its second
+half in some terminal pastes.
 
 - [ ] **Step 5: Deploy**
 
