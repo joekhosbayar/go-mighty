@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/joekhosbayar/go-mighty/internal/game"
+	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/store/postgres"
 	redisstore "github.com/joekhosbayar/go-mighty/internal/store/redis"
 	"github.com/redis/go-redis/v9"
@@ -40,14 +41,30 @@ type RedisStore interface {
 type Game struct {
 	redisStore    RedisStore
 	postgresStore *postgres.Store
+	metrics       *obs.Metrics
+}
+
+// Option configures a Game service at construction time.
+type Option func(*Game)
+
+// WithMetrics installs the OTel instruments. Methods on *obs.Metrics are
+// nil-safe, so omitting this leaves the service uninstrumented.
+func WithMetrics(m *obs.Metrics) Option {
+	return func(g *Game) { g.metrics = m }
 }
 
 // NewGame creates and returns a new Game service instance.
-func NewGame(r RedisStore, p *postgres.Store) *Game {
-	return &Game{
+func NewGame(r RedisStore, p *postgres.Store, opts ...Option) *Game {
+	g := &Game{
 		redisStore:    r,
 		postgresStore: p,
 	}
+
+	for _, opt := range opts {
+		opt(g)
+	}
+
+	return g
 }
 
 // withGameLock acquires the game's distributed lock, mapping contention to ErrGameBusy.
@@ -84,6 +101,8 @@ func (s *Game) CreateGame(ctx context.Context, id string, cfg game.GameConfig) (
 		"type": "game_created",
 		"game": g,
 	})
+
+	s.metrics.RecordGameCreated(ctx)
 
 	return g, nil
 }
@@ -190,7 +209,29 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 // ProcessMove validates and applies a game move. It handles concurrency via a distributed lock
 // and optimistic version checking. The move is persisted to the Postgres ledger and published
 // to the game's event channel.
-func (s *Game) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload any, clientVersion int64) (*game.Game, error) {
+func (s *Game) ProcessMove(ctx context.Context, gameID, playerID string, moveType game.MoveType, payload any, clientVersion int64) (g *game.Game, err error) {
+	start := time.Now()
+
+	// Classify every exit path once, here, rather than at each return.
+	defer func() {
+		outcome := obs.MoveValid
+
+		switch {
+		case err == nil:
+			// valid
+		case errors.Is(err, redisstore.ErrStaleVersion):
+			outcome = obs.MoveConflict
+
+			s.metrics.RecordOptimisticConflict(ctx)
+		case errors.Is(err, game.ErrInvalidMove):
+			outcome = obs.MoveInvalid
+		default:
+			outcome = obs.MoveError
+		}
+
+		s.metrics.RecordMove(ctx, outcome, time.Since(start).Seconds())
+	}()
+
 	// 1. Lock
 	release, err := s.withGameLock(ctx, gameID)
 	if err != nil {
@@ -199,7 +240,7 @@ func (s *Game) ProcessMove(ctx context.Context, gameID, playerID string, moveTyp
 	defer release()
 
 	// 2. Load
-	g, err := s.redisStore.LoadGame(ctx, gameID)
+	g, err = s.redisStore.LoadGame(ctx, gameID)
 	if err != nil {
 		return nil, err
 	}

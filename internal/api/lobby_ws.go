@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -9,17 +10,30 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/joekhosbayar/go-mighty/internal/obs"
 	"github.com/joekhosbayar/go-mighty/internal/service"
-	"github.com/rs/zerolog/log"
 )
 
 // LobbyWSHandler handles websocket connections for the global lobby feed.
 func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
-	up := h.upgrader()
+	hsCtx, hsSpan := obs.StartWSHandshakeSpan(r.Context(), obs.KindLobby)
+
+	var originRejected bool
+
+	up := h.upgraderFor(&originRejected)
 
 	conn, err := up.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to upgrade lobby websocket")
+		obs.Log(hsCtx).Error().Err(err).Msg("Failed to upgrade lobby websocket")
+
+		outcome := obs.OutcomeUpgradeFailed
+		if originRejected {
+			outcome = obs.OutcomeOriginRejected
+		}
+
+		h.metrics.RecordHandshake(hsCtx, obs.KindLobby, outcome)
+		obs.EndWSHandshakeSpan(hsSpan, outcome)
+
 		return
 	}
 	defer func() { _ = conn.Close() }()
@@ -27,10 +41,10 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(maxWSMessageBytes)
 
 	var wsWriteMu sync.Mutex
-	sendError := func(errMsg string) {
-		log.Warn().Str("error", errMsg).Msg("Lobby websocket auth failed")
+	sendError := func(ctx context.Context, errMsg string) {
+		obs.Log(ctx).Warn().Str("error", errMsg).Msg("Lobby websocket auth failed")
 		if wsErr := h.sendWSError(conn, errMsg, &wsWriteMu); wsErr != nil {
-			log.Warn().Err(wsErr).Msg("Failed to send lobby websocket error")
+			obs.Log(ctx).Warn().Err(wsErr).Msg("Failed to send lobby websocket error")
 		}
 		closeWithCode(conn, websocket.ClosePolicyViolation, errMsg, &wsWriteMu)
 	}
@@ -42,9 +56,19 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			sendError("auth timed out")
+			// Record the outcome before telling the client: sendError puts
+			// the close frame on the wire, and a client that observes that
+			// frame is not proof the server is done - see drainToCloseError
+			// in ws_hardening_test.go. Recording first is also simply the
+			// correct production order: the metric should reflect what the
+			// server decided, not what the client happened to observe.
+			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthTimeout)
+			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthTimeout)
+			sendError(hsCtx, "auth timed out")
 		} else {
-			sendError("failed to read auth message")
+			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthFailed)
+			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+			sendError(hsCtx, "failed to read auth message")
 		}
 		return
 	}
@@ -54,16 +78,23 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(authMessage, &authReq); err != nil || authReq.Type != "AUTH" {
-		sendError("expected AUTH message")
+		h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthFailed)
+		obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+		sendError(hsCtx, "expected AUTH message")
+
 		return
 	}
 
 	claims, err := h.authSvc.ValidateToken(r.Context(), authReq.Token)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidToken) {
-			sendError("unauthorized")
+			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthFailed)
+			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthFailed)
+			sendError(hsCtx, "unauthorized")
 		} else {
-			sendError("auth unavailable")
+			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeAuthUnavailable)
+			obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeAuthUnavailable)
+			sendError(hsCtx, "auth unavailable")
 		}
 		return
 	}
@@ -71,11 +102,25 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 	if h.conns != nil {
 		release, connErr := h.conns.acquire(claims.UserID, ClientIP(r, h.trustProxy))
 		if connErr != nil {
+			outcome := obs.OutcomeConnLimitIP
+			if errors.Is(connErr, errTooManyUserConns) {
+				outcome = obs.OutcomeConnLimitUser
+			}
+
+			h.metrics.RecordHandshake(hsCtx, obs.KindLobby, outcome)
+			obs.EndWSHandshakeSpan(hsSpan, outcome)
 			closeWithCode(conn, websocket.CloseTryAgainLater, connErr.Error(), &wsWriteMu)
+
 			return
 		}
 		defer release()
 	}
+
+	h.metrics.RecordHandshake(hsCtx, obs.KindLobby, obs.OutcomeOK)
+	obs.EndWSHandshakeSpan(hsSpan, obs.OutcomeOK)
+	h.metrics.AddConnection(r.Context(), obs.KindLobby, 1)
+
+	defer h.metrics.AddConnection(r.Context(), obs.KindLobby, -1)
 
 	_ = conn.SetReadDeadline(time.Now().Add(wsIdleTimeout))
 	conn.SetPongHandler(func(string) error {
@@ -84,7 +129,7 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 
 	pubsub := h.svc.Subscribe(r.Context(), "lobby_events")
 	if pubsub == nil {
-		sendError("websocket unavailable")
+		sendError(hsCtx, "websocket unavailable")
 		return
 	}
 	defer func() { _ = pubsub.Close() }()

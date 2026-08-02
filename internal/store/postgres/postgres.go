@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/XSAM/otelsql"
 	"github.com/joekhosbayar/go-mighty/internal/game"
 	_ "github.com/lib/pq" // Import the postgres driver for database/sql.
 	"github.com/rs/zerolog/log"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
 // Store implements the storage interface for PostgreSQL.
@@ -25,12 +27,42 @@ func NewStoreWithDB(db *sql.DB) *Store {
 // NewStore creates a new Store instance by opening a connection to PostgreSQL
 // using the provided connection string.
 func NewStore(connStr string) (*Store, error) {
-	db, err := sql.Open("postgres", connStr)
+	// One span per query is enough: OmitRows suppresses the extra "sql.rows"
+	// span otelsql would otherwise open per row-returning query (covering
+	// cursor open->close), and RowsNext (left at its default false) is what
+	// would additionally add a span per Rows.Next call. Neither multiplies
+	// spans by row count on its own, but together they'd double- and
+	// over-instrument every SELECT for no diagnostic gain.
+	db, err := otelsql.Open("postgres", connStr,
+		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
+		otelsql.WithSpanOptions(otelsql.SpanOptions{
+			DisableErrSkip: true,
+			OmitRows:       true,
+		}))
 	if err != nil {
 		return nil, err
 	}
 
+	// Ping before registering the stats callback: main.go retries NewStore up
+	// to 30 times on a cold boot, and RegisterDBStatsMetrics attaches an
+	// observable callback that holds this *sql.DB alive for as long as it
+	// stays registered. Registering before a successful Ping would leave one
+	// live callback per failed attempt - e.g. ~20 of them on a 20s-late
+	// Postgres - all reporting db.sql.connection.open under an identical
+	// attribute set, so the SDK collapses them into duplicate measurements
+	// and the pool-pressure signal below becomes wrong instead of just slow.
 	if err := db.PingContext(context.Background()); err != nil {
+		_ = db.Close()
+
+		return nil, err
+	}
+
+	// Pool stats: open, idle, and crucially WAITING connections, which are
+	// the earliest honest signal of pool pressure and back the Postgres
+	// saturation alert.
+	if _, err := otelsql.RegisterDBStatsMetrics(db, otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL)); err != nil {
+		_ = db.Close()
+
 		return nil, err
 	}
 

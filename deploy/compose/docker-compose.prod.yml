@@ -32,11 +32,42 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_started
+      alloy:
+        condition: service_started
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Single telemetry egress path. The only container holding Grafana Cloud
+  # credentials; `mighty` exports to alloy:4317 and never learns the vendor
+  # exists. 4317 is deliberately NOT published to the host.
+  alloy:
+    image: grafana/alloy:v1.10.0
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=127.0.0.1:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    env_file: .env
+    # Hard ceiling on a 2GB box: worst case Alloy OOMs alone rather than
+    # taking Postgres with it.
+    mem_limit: 256m
+    pid: host
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - alloy_data:/var/lib/alloy/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   migrate:
     image: migrate/migrate:v4.19.1
@@ -46,6 +77,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   postgres:
     image: postgres:16
@@ -61,15 +97,30 @@ services:
       retries: 12
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Docker's json-file driver is unbounded by default. Without this, the log
+    # grows until it fills the 20GB root volume it shares with the Postgres
+    # data directory — a slow leak with no ceiling, and the single most likely
+    # way this box runs out of disk.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
       - redis_data:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 volumes:
   caddy_data:
   caddy_config:
   postgres_data:
   redis_data:
+  alloy_data:

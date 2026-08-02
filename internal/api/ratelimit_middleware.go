@@ -35,6 +35,8 @@ func (h *Handler) RateLimitByUser(action string, rule ratelimit.Rule) func(http.
 					Int("retry_after_s", retry).
 					Msg("Per-user rate limit exceeded")
 
+				h.metrics.RecordRateLimitRejection(r.Context(), action)
+
 				w.Header().Set("Retry-After", strconv.Itoa(retry))
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 

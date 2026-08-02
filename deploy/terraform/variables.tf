@@ -27,3 +27,25 @@ variable "github_token" {
   description = "GitHub Personal Access Token for Amplify Hosting"
   sensitive   = true
 }
+
+variable "grafana_url" {
+  type        = string
+  description = "Grafana Cloud stack URL, e.g. https://mighty.grafana.net"
+}
+
+variable "grafana_sa_token" {
+  type        = string
+  description = "Grafana service account token with Admin on the stack (for managing alert rules)"
+  sensitive   = true
+}
+
+variable "discord_webhook_url" {
+  type        = string
+  description = "Discord webhook URL that alert notifications are posted to"
+  sensitive   = true
+}
+
+variable "prom_datasource_uid" {
+  type        = string
+  description = "UID of the grafanacloud-<stack>-prom datasource that alert rules query"
+}
