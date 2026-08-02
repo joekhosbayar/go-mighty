@@ -77,6 +77,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   postgres:
     image: postgres:16
@@ -92,12 +97,26 @@ services:
       retries: 12
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Docker's json-file driver is unbounded by default. Without this, the log
+    # grows until it fills the 20GB root volume it shares with the Postgres
+    # data directory — a slow leak with no ceiling, and the single most likely
+    # way this box runs out of disk.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
       - redis_data:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 volumes:
   caddy_data:
