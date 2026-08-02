@@ -310,11 +310,18 @@ paths: a missing `/push` gives `404`; a wrong Loki path gives `405`.
 
 ### Terraform must not read Set A
 
-Terraform stores **data source** results in state in plaintext, and
-`terraform.tfstate` here is local and unencrypted. Declaring the Grafana SSM
-parameters — even as `data` sources — would write the access token to disk in
-cleartext, **for no consumer**: nothing in the config references them. Only
-`remote-deploy.sh` needs them, and it reads SSM directly on the box.
+Terraform stores **data source** results in state in plaintext, exactly as it
+stores managed resources. State here lives in an S3 backend
+(`mighty-tfstate-711387141487`, key `mvp/terraform.tfstate`) — so it is not on
+anyone's laptop, and S3 encrypts at rest. That is meaningfully better than a
+local state file, but it does not make the copy free: the token would be
+readable by anyone with read access to that bucket, and it would sit in every
+historical state version.
+
+The decisive argument is simpler and doesn't depend on where state lives:
+**nothing in the config references those parameters.** Only `remote-deploy.sh`
+needs them, and it reads SSM directly on the box via the instance role. A copy
+at rest with no consumer is pure downside.
 
 > A secret should be read by exactly the thing that uses it, as late as
 > possible. Routing it through a tool that only passes it along adds a copy at

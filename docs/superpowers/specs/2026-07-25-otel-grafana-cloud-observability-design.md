@@ -90,10 +90,12 @@ Grafana Cloud uses a distinct user/instance ID per backend, which is why this is
 **Terraform must not read these parameters.** Only `remote-deploy.sh` consumes
 them, reading from SSM on the box at deploy time via the instance role.
 Declaring them in Terraform — even as `data` sources — writes their values,
-including the access token, in plaintext into `terraform.tfstate`, which is
-local and unencrypted in this project. A secret should be read by the thing
-that uses it, as late as possible; routing it through a tool that only passes
-it along adds a copy at rest and buys nothing.
+including the access token, in plaintext into `terraform.tfstate`. State here
+is in an S3 backend, so it is encrypted at rest and not on a laptop; but it is
+still a copy readable by anyone with bucket access, retained across every state
+version, and **nothing in the config consumes it**. A secret should be read by
+the thing that uses it, as late as possible; routing it through a tool that
+only passes it along adds a copy at rest and buys nothing.
 
 ### Failure modes
 

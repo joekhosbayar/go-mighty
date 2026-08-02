@@ -164,7 +164,7 @@ Expected: all seven names listed.
 
 An earlier draft of this plan told you to append a `data "aws_ssm_parameter" "grafana"` block here, with a comment claiming that using a `data` source rather than a `resource` keeps the access token out of state. **That reasoning is wrong and the block is a credential leak.**
 
-Terraform stores the results of **data sources** in state, in plaintext, exactly as it stores managed resources. `deploy/terraform/terraform.tfstate` in this project is local and unencrypted. So that block would have written your Grafana access-policy token — the one with `metrics:write, logs:write, traces:write` — into a plaintext file on the operator's laptop, in service of nothing.
+Terraform stores the results of **data sources** in state, in plaintext, exactly as it stores managed resources. State here is in an S3 backend (`mighty-tfstate-711387141487`), so it is encrypted at rest and not on a laptop — but the token would still be written into state in cleartext, readable by anyone with bucket access and retained across every state version, in service of nothing.
 
 In service of nothing, precisely: **no Terraform resource in this plan ever references those data sources.** They were purely declarative. The only consumer of these parameters is `remote-deploy.sh`, which reads them straight from SSM on the box at deploy time (Task 2, Step 3) using the instance role. Terraform has no reason to see them at all.
 
