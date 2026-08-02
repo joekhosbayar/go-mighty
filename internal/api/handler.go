@@ -155,7 +155,7 @@ func (h *Handler) CreateGameHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(updatedState)
+	_ = json.NewEncoder(w).Encode(updatedState.ViewFor(claims.UserID))
 }
 
 // JoinGameHandler - POST /games/{id}/join.
@@ -191,7 +191,7 @@ func (h *Handler) JoinGameHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(g)
+	_ = json.NewEncoder(w).Encode(g.ViewFor(claims.UserID))
 }
 
 // MoveHandler - POST /games/{id}/move.
@@ -237,7 +237,7 @@ func (h *Handler) MoveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(g)
+	_ = json.NewEncoder(w).Encode(g.ViewFor(claims.UserID))
 }
 
 // ConvertPayload converts generic map/interface to concrete struct.
@@ -306,7 +306,16 @@ func ConvertPayload(moveType game.MoveType, payload any) (any, error) {
 }
 
 // GetGameHandler - GET /games/{id}.
+//
+// Authenticated because the response is redacted for the caller: without an
+// identity there is no way to decide whose hand may be included.
 func (h *Handler) GetGameHandler(w http.ResponseWriter, r *http.Request) {
+	claims, err := h.authenticate(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+
 	gameID := r.PathValue("id")
 
 	g, err := h.svc.GetGame(r.Context(), gameID)
@@ -321,12 +330,23 @@ func (h *Handler) GetGameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if g == nil {
+		http.Error(w, "game not found", http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(g)
+	_ = json.NewEncoder(w).Encode(g.ViewFor(claims.UserID))
 }
 
 // ListGamesHandler - GET /games.
 func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
+	claims, err := h.authenticate(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+
 	// Query param 'status' (e.g. ?status=waiting)
 	statusParam := r.URL.Query().Get("status")
 	if statusParam == "" {
@@ -353,13 +373,14 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Make sure we return an empty array instead of null if no games are found
-	if games == nil {
-		games = []*game.Game{}
+	// Built with make so an empty result encodes as [] rather than null.
+	views := make([]*game.GameView, 0, len(games))
+	for _, g := range games {
+		views = append(views, g.ViewFor(claims.UserID))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(games)
+	_ = json.NewEncoder(w).Encode(views)
 }
 
 // msgSuccessResponse is the log message for the default (2xx) case. It is a

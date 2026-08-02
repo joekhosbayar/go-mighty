@@ -126,6 +126,8 @@ func TestListGamesHandler_Success(t *testing.T) {
 		WillReturnRows(rows)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games?status=waiting", nil)
+	req.Header.Set("Authorization", "Bearer "+generateValidToken("player-1", "alice"))
+
 	rec := httptest.NewRecorder()
 
 	handler.ListGamesHandler(rec, req)
@@ -180,6 +182,8 @@ func TestListGamesHandler_InvalidStatus(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games?status=unknown", nil)
+	req.Header.Set("Authorization", "Bearer "+generateValidToken("player-1", "alice"))
+
 	rec := httptest.NewRecorder()
 
 	handler.ListGamesHandler(rec, req)
