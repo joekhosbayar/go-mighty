@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/joekhosbayar/go-mighty/internal/service"
 )
 
 func setupLobbyWSTestServer(t *testing.T) (*httptest.Server, *fakeWSGameService) {
@@ -56,21 +57,34 @@ func TestLobbyWSHandler_Success(t *testing.T) {
 	// Wait briefly for subscription to settle
 	time.Sleep(50 * time.Millisecond)
 
-	// Publish event to lobby_events
-	eventPayload := `{"type":"lobby_updated","open_games":3}`
+	// open_games is not declared on service.LobbyEvent. Publishing it here
+	// pins the fail-closed property: the relay decodes into the envelope type
+	// and re-encodes, so an undeclared field is dropped rather than forwarded.
+	eventPayload := `{"type":"game_joined","game_id":"g1","players_seated":2,"max_players":5,"open_games":3}`
+
 	err = svc.redisClient.Publish(t.Context(), "game:lobby_events:events", eventPayload).Err()
 	if err != nil {
 		t.Fatalf("failed to publish lobby event: %v", err)
 	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("failed to read message from ws: %v", err)
 	}
 
-	if string(msg) != eventPayload {
-		t.Errorf("expected %s, got %s", eventPayload, string(msg))
+	var got service.LobbyEvent
+	if err := json.Unmarshal(msg, &got); err != nil {
+		t.Fatalf("failed to decode relayed lobby event %s: %v", msg, err)
+	}
+
+	if got.Type != service.EventTypeGameJoined || got.GameID != "g1" || got.PlayersSeated != 2 || got.MaxPlayers != 5 {
+		t.Errorf("relayed lobby event mangled: %+v", got)
+	}
+
+	if strings.Contains(string(msg), "open_games") {
+		t.Errorf("undeclared field survived the relay: %s", msg)
 	}
 }
 
