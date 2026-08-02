@@ -3,64 +3,64 @@
 // tier allows 10k series and this box has 2GB of RAM.
 
 logging {
-  level  = "info"
-  format = "logfmt"
+	level  = "info"
+	format = "logfmt"
 }
 
 // ---------------------------------------------------------------- destinations
 
 prometheus.remote_write "grafana_cloud" {
-  endpoint {
-    url = sys.env("GRAFANA_PROM_URL")
+	endpoint {
+		url = sys.env("GRAFANA_PROM_URL")
 
-    basic_auth {
-      username = sys.env("GRAFANA_PROM_USER_ID")
-      password = sys.env("GRAFANA_TOKEN")
-    }
+		basic_auth {
+			username = sys.env("GRAFANA_PROM_USER_ID")
+			password = sys.env("GRAFANA_TOKEN")
+		}
 
-    // Small shard/queue budget: this box has one service, not a fleet.
-    queue_config {
-      capacity             = 2500
-      max_shards           = 2
-      max_samples_per_send = 500
-    }
-  }
+		// Small shard/queue budget: this box has one service, not a fleet.
+		queue_config {
+			capacity             = 2500
+			max_shards           = 2
+			max_samples_per_send = 500
+		}
+	}
 
-  // Bound the WAL. An unbounded WAL during a multi-day Grafana Cloud outage
-  // would fill the 20GB root volume and take the game down with it —
-  // observability must not become the outage.
-  wal {
-    truncate_frequency  = "30m"
-    max_keepalive_time  = "2h"
-  }
+	// Bound the WAL. An unbounded WAL during a multi-day Grafana Cloud outage
+	// would fill the 20GB root volume and take the game down with it —
+	// observability must not become the outage.
+	wal {
+		truncate_frequency = "30m"
+		max_keepalive_time = "2h"
+	}
 }
 
 loki.write "grafana_cloud" {
-  endpoint {
-    url = sys.env("GRAFANA_LOKI_URL")
+	endpoint {
+		url = sys.env("GRAFANA_LOKI_URL")
 
-    basic_auth {
-      username = sys.env("GRAFANA_LOKI_USER_ID")
-      password = sys.env("GRAFANA_TOKEN")
-    }
-  }
+		basic_auth {
+			username = sys.env("GRAFANA_LOKI_USER_ID")
+			password = sys.env("GRAFANA_TOKEN")
+		}
+	}
 }
 
 otelcol.auth.basic "grafana_cloud" {
-  username = sys.env("GRAFANA_OTLP_INSTANCE_ID")
-  password = sys.env("GRAFANA_TOKEN")
+	username = sys.env("GRAFANA_OTLP_INSTANCE_ID")
+	password = sys.env("GRAFANA_TOKEN")
 }
 
 otelcol.exporter.otlphttp "grafana_cloud" {
-  client {
-    endpoint = sys.env("GRAFANA_OTLP_ENDPOINT")
-    auth     = otelcol.auth.basic.grafana_cloud.handler
-  }
+	client {
+		endpoint = sys.env("GRAFANA_OTLP_ENDPOINT")
+		auth     = otelcol.auth.basic.grafana_cloud.handler
+	}
 
-  sending_queue {
-    enabled    = true
-    queue_size = 1000
-  }
+	sending_queue {
+		enabled    = true
+		queue_size = 1000
+	}
 }
 
 // ------------------------------------------------------------------ app (OTLP)
@@ -69,24 +69,24 @@ otelcol.exporter.otlphttp "grafana_cloud" {
 // else.
 
 otelcol.receiver.otlp "app" {
-  grpc {
-    endpoint = "0.0.0.0:4317"
-  }
+	grpc {
+		endpoint = "0.0.0.0:4317"
+	}
 
-  output {
-    traces  = [otelcol.processor.batch.default.input]
-    metrics = [otelcol.processor.batch.default.input]
-  }
+	output {
+		traces  = [otelcol.processor.batch.default.input]
+		metrics = [otelcol.processor.batch.default.input]
+	}
 }
 
 otelcol.processor.batch "default" {
-  send_batch_size = 512
-  timeout         = "10s"
+	send_batch_size = 512
+	timeout         = "10s"
 
-  output {
-    traces  = [otelcol.exporter.otlphttp.grafana_cloud.input]
-    metrics = [otelcol.exporter.otlphttp.grafana_cloud.input]
-  }
+	output {
+		traces  = [otelcol.exporter.otlphttp.grafana_cloud.input]
+		metrics = [otelcol.exporter.otlphttp.grafana_cloud.input]
+	}
 }
 
 // ----------------------------------------------------------------- host metrics
@@ -94,114 +94,114 @@ otelcol.processor.batch "default" {
 // 1k series of mostly noise against a 10k budget.
 
 prometheus.exporter.unix "host" {
-  // Alloy runs in a container; without these it would report the container's
-  // view of memory and disk rather than the box's.
-  procfs_path = "/host/proc"
-  sysfs_path  = "/host/sys"
-  rootfs_path = "/rootfs"
+	// Alloy runs in a container; without these it would report the container's
+	// view of memory and disk rather than the box's.
+	procfs_path = "/host/proc"
+	sysfs_path  = "/host/sys"
+	rootfs_path = "/rootfs"
 
-  set_collectors = [
-    "cpu",
-    "diskstats",
-    "filesystem",
-    "loadavg",
-    "meminfo",
-    "netdev",
-    "stat",
-    "vmstat",
-  ]
+	set_collectors = [
+		"cpu",
+		"diskstats",
+		"filesystem",
+		"loadavg",
+		"meminfo",
+		"netdev",
+		"stat",
+		"vmstat",
+	]
 
-  filesystem {
-    mount_points_exclude = "^/(dev|proc|sys|run|host|rootfs/(dev|proc|sys|run))($|/)"
-    fs_types_exclude     = "^(autofs|binfmt_misc|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|nsfs|overlay|proc|pstore|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
-  }
+	filesystem {
+		mount_points_exclude = "^/(dev|proc|sys|run|host|rootfs/(dev|proc|sys|run))($|/)"
+		fs_types_exclude     = "^(autofs|binfmt_misc|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|nsfs|overlay|proc|pstore|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+	}
 }
 
 discovery.relabel "host" {
-  targets = prometheus.exporter.unix.host.targets
+	targets = prometheus.exporter.unix.host.targets
 
-  rule {
-    target_label = "job"
-    replacement  = "mighty/host"
-  }
+	rule {
+		target_label = "job"
+		replacement  = "mighty/host"
+	}
 
-  rule {
-    target_label = "instance"
-    replacement  = "mighty-api"
-  }
+	rule {
+		target_label = "instance"
+		replacement  = "mighty-api"
+	}
 
-  rule {
-    target_label = "env"
-    replacement  = sys.env("MIGHTY_ENV")
-  }
+	rule {
+		target_label = "env"
+		replacement  = sys.env("MIGHTY_ENV")
+	}
 }
 
 prometheus.scrape "host" {
-  targets         = discovery.relabel.host.output
-  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
-  scrape_interval = "60s"
+	targets         = discovery.relabel.host.output
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+	scrape_interval = "60s"
 }
 
 // ---------------------------------------------------------------- container logs
 
 discovery.docker "containers" {
-  host             = "unix:///var/run/docker.sock"
-  refresh_interval = "30s"
+	host             = "unix:///var/run/docker.sock"
+	refresh_interval = "30s"
 }
 
 discovery.relabel "container_logs" {
-  targets = discovery.docker.containers.targets
+	targets = discovery.docker.containers.targets
 
-  // Drop Alloy's own container. Alloy logging about shipping logs generates
-  // logs to ship — a feedback loop that bills you for its own noise.
-  rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/?.*alloy.*"
-    action        = "drop"
-  }
+	// Drop Alloy's own container. Alloy logging about shipping logs generates
+	// logs to ship — a feedback loop that bills you for its own noise.
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/?.*alloy.*"
+		action        = "drop"
+	}
 
-  rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/?(.*)"
-    target_label  = "container"
-  }
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/?(.*)"
+		target_label  = "container"
+	}
 
-  rule {
-    target_label = "service"
-    replacement  = "mighty"
-  }
+	rule {
+		target_label = "service"
+		replacement  = "mighty"
+	}
 
-  rule {
-    target_label = "env"
-    replacement  = sys.env("MIGHTY_ENV")
-  }
+	rule {
+		target_label = "env"
+		replacement  = sys.env("MIGHTY_ENV")
+	}
 }
 
 loki.source.docker "containers" {
-  host             = "unix:///var/run/docker.sock"
-  targets          = discovery.relabel.container_logs.output
-  forward_to       = [loki.process.zerolog.receiver]
-  refresh_interval = "30s"
+	host             = "unix:///var/run/docker.sock"
+	targets          = discovery.relabel.container_logs.output
+	forward_to       = [loki.process.zerolog.receiver]
+	refresh_interval = "30s"
 }
 
 loki.process "zerolog" {
-  // Promote `level` only. trace_id stays a FIELD, never a label: it is
-  // unbounded and one label per trace would explode stream cardinality.
-  // Non-JSON producers (postgres, redis) simply yield an empty level here,
-  // which is acceptable — they are low-volume and queried by container.
-  stage.json {
-    expressions = { level = "level" }
-  }
+	// Promote `level` only. trace_id stays a FIELD, never a label: it is
+	// unbounded and one label per trace would explode stream cardinality.
+	// Non-JSON producers (postgres, redis) simply yield an empty level here,
+	// which is acceptable — they are low-volume and queried by container.
+	stage.json {
+		expressions = {level = "level"}
+	}
 
-  stage.labels {
-    values = { level = "level" }
-  }
+	stage.labels {
+		values = {level = "level"}
+	}
 
-  // Alloy attaches the discovery filename; it is per-container-id and would
-  // create a new stream on every container recreate.
-  stage.label_drop {
-    values = ["filename"]
-  }
+	// Alloy attaches the discovery filename; it is per-container-id and would
+	// create a new stream on every container recreate.
+	stage.label_drop {
+		values = ["filename"]
+	}
 
-  forward_to = [loki.write.grafana_cloud.receiver]
+	forward_to = [loki.write.grafana_cloud.receiver]
 }
