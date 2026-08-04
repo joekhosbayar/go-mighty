@@ -374,8 +374,17 @@ func (h *Handler) ListGamesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Built with make so an empty result encodes as [] rather than null.
+	// ListGamesByStatus never returns a nil element today, but g.ViewFor(nil)
+	// returns nil too, and a nil element in this slice would encode as a
+	// `null` array entry - something the lobby UI dereferences with `.id`
+	// and would crash on. Skipping keeps that unreachable rather than merely
+	// unobserved.
 	views := make([]*game.GameView, 0, len(games))
 	for _, g := range games {
+		if g == nil {
+			continue
+		}
+
 		views = append(views, g.ViewFor(claims.UserID))
 	}
 

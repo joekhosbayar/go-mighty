@@ -54,14 +54,21 @@ func (e GameEvent) RedactFor(userID string) OutgoingGameEvent {
 	return out
 }
 
-// LobbyEvent is the envelope published to the lobby channel. Its Game is
-// already a public view, so the lobby relay only re-encodes it.
+// LobbyEvent is the envelope published to the lobby channel. Game is a
+// LobbyGameView, not a GameView: GameView still carries the *Game embed
+// (its safety comes from shadowing, not absence), so putting one here would
+// let a future publisher pass a per-player ViewFor(userID) result straight
+// through and fan one player's hand out to every socket in the lobby.
+// LobbyGameView has no field able to hold a hand or the kitty regardless of
+// which viewer built it, which is what makes this relay fail-closed by
+// construction rather than by the relay decoding-and-re-encoding discipline
+// alone (see lobby_ws.go).
 type LobbyEvent struct {
-	Type          string         `json:"type"`
-	GameID        string         `json:"game_id,omitempty"`
-	Game          *game.GameView `json:"game,omitempty"`
-	PlayersSeated int            `json:"players_seated,omitempty"`
-	MaxPlayers    int            `json:"max_players,omitempty"`
+	Type          string              `json:"type"`
+	GameID        string              `json:"game_id,omitempty"`
+	Game          *game.LobbyGameView `json:"game,omitempty"`
+	PlayersSeated int                 `json:"players_seated,omitempty"`
+	MaxPlayers    int                 `json:"max_players,omitempty"`
 }
 
 // EventType lets the Redis store log the logical name rather than the Go type.

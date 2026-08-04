@@ -88,6 +88,77 @@ func TestLobbyWSHandler_Success(t *testing.T) {
 	}
 }
 
+// TestLobbyWSHandler_HandAndKittyDoNotSurviveTheRelay pins the Fix-1
+// property: even if a future publisher builds a LobbyEvent from a raw
+// game.Game (or otherwise smuggles hand/kitty keys onto the wire before
+// they reach Redis), game.LobbyGameView has no field capable of holding
+// them, so json.Unmarshal into service.LobbyEvent silently drops the keys
+// and json.Marshal never re-emits them. This is what "structurally cannot
+// carry secrets" buys over the runtime-scrubbing alternative.
+func TestLobbyWSHandler_HandAndKittyDoNotSurviveTheRelay(t *testing.T) {
+	t.Parallel()
+
+	server, svc := setupLobbyWSTestServer(t)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/lobby/ws"
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to connect to lobby ws: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	authMsg := map[string]string{"type": "AUTH", "token": "valid_token"}
+
+	authBytes, _ := json.Marshal(authMsg)
+	if err := conn.WriteMessage(websocket.TextMessage, authBytes); err != nil {
+		t.Fatalf("failed to send auth message: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// A hostile or buggy publisher: a full hand on seat 0 and a populated
+	// kitty riding along on a game_created event. Neither field exists on
+	// game.LobbyGameView, so this proves the relay drops them rather than
+	// merely trusting that no publisher will ever send them.
+	eventPayload := `{"type":"game_created","game":{` +
+		`"id":"g1","status":"waiting","config":{"num_players":5},` +
+		`"players":[{"id":"p0","name":"P0","seat":0,` +
+		`"hand":[{"suit":"spades","rank":"A"}],"hand_count":10,"is_connected":true}],` +
+		`"kitty":[{"suit":"hearts","rank":"K"}],` +
+		`"version":1,"created_at":"2026-01-01T00:00:00Z"}}`
+
+	err = svc.redisClient.Publish(t.Context(), "game:lobby_events:events", eventPayload).Err()
+	if err != nil {
+		t.Fatalf("failed to publish lobby event: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read message from ws: %v", err)
+	}
+
+	if strings.Contains(string(msg), `"hand"`) {
+		t.Errorf("a hand reached the lobby socket: %s", msg)
+	}
+
+	if strings.Contains(string(msg), `"kitty"`) {
+		t.Errorf("the kitty reached the lobby socket: %s", msg)
+	}
+
+	// The rest of the row should still make it through intact.
+	var got service.LobbyEvent
+	if err := json.Unmarshal(msg, &got); err != nil {
+		t.Fatalf("failed to decode relayed lobby event %s: %v", msg, err)
+	}
+
+	if got.Game == nil || got.Game.ID != "g1" {
+		t.Errorf("expected game g1 to survive the relay, got %+v", got.Game)
+	}
+}
+
 func TestLobbyWSHandler_InvalidAuthMessage(t *testing.T) {
 	t.Parallel()
 

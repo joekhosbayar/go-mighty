@@ -99,7 +99,7 @@ func (s *Game) CreateGame(ctx context.Context, id string, cfg game.GameConfig) (
 
 	_ = s.redisStore.PublishEvent(ctx, "lobby_events", LobbyEvent{
 		Type: EventTypeGameCreated,
-		Game: g.ViewFor(""),
+		Game: g.LobbyView(),
 	})
 
 	s.metrics.RecordGameCreated(ctx)

@@ -163,16 +163,80 @@ var gameFieldClassification = map[string]string{
 	"CreatedAt": "public", "UpdatedAt": "public",
 }
 
+// jsonTagName resolves the wire name encoding/json would use for f: the part
+// of the json tag before the first comma (so `json:"foo,omitempty"` yields
+// "foo"), or the Go field name when the tag is absent or empty, matching
+// encoding/json's own fallback.
+func jsonTagName(f reflect.StructField) string {
+	tag := f.Tag.Get("json")
+	if tag == "" {
+		return f.Name
+	}
+
+	name, _, _ := strings.Cut(tag, ",")
+	if name == "" {
+		return f.Name
+	}
+
+	return name
+}
+
 func TestEveryGameFieldIsClassified(t *testing.T) {
 	t.Parallel()
 
 	typ := reflect.TypeOf(Game{})
+	viewTyp := reflect.TypeOf(GameView{})
+
 	for i := range typ.NumField() {
-		name := typ.Field(i).Name
-		if _, ok := gameFieldClassification[name]; !ok {
+		field := typ.Field(i)
+		name := field.Name
+
+		class, ok := gameFieldClassification[name]
+		if !ok {
 			t.Errorf("game.Game field %q has no redaction classification. "+
 				"Add it to gameFieldClassification in view_test.go, and if it is "+
 				"secret or per-player, shadow it in GameView.", name)
+
+			continue
+		}
+
+		if class != "secret" && class != "per-player" {
+			continue
+		}
+
+		// A classification of secret or per-player is only honored if the
+		// field is either excluded from JSON entirely or shadowed by a
+		// depth-0 field on GameView with the same wire name: encoding/json
+		// resolves depth-0 fields over the ones *Game promotes, so that's
+		// what actually keeps the value off the wire. Without this check,
+		// classifying a field is a no-op that the compiler and test both let
+		// through silently.
+		tagName := jsonTagName(field)
+		if tagName == "-" {
+			continue
+		}
+
+		shadowed := false
+
+		for j := range viewTyp.NumField() {
+			vf := viewTyp.Field(j)
+			if vf.Anonymous {
+				continue
+			}
+
+			if jsonTagName(vf) == tagName {
+				shadowed = true
+				break
+			}
+		}
+
+		if !shadowed {
+			t.Errorf("game.Game field %q is classified %q but GameView has no "+
+				"depth-0 field shadowing its JSON key %q, and Game.%s is not "+
+				"tagged `json:\"-\"`. Add a field to GameView with `json:\"%s\"` "+
+				"that holds the redacted value (see Kitty), or tag Game.%s as "+
+				"`json:\"-\"` if it must never be marshalled at all (see Deck).",
+				name, class, tagName, name, tagName, name)
 		}
 	}
 
