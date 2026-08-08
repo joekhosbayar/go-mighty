@@ -97,9 +97,9 @@ func (s *Game) CreateGame(ctx context.Context, id string, cfg game.GameConfig) (
 		return nil, fmt.Errorf("failed to save game in redis: %w", err)
 	}
 
-	_ = s.redisStore.PublishEvent(ctx, "lobby_events", map[string]any{
-		"type": "game_created",
-		"game": g,
+	_ = s.redisStore.PublishEvent(ctx, "lobby_events", LobbyEvent{
+		Type: EventTypeGameCreated,
+		Game: g.LobbyView(),
 	})
 
 	s.metrics.RecordGameCreated(ctx)
@@ -183,10 +183,10 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 	}
 
 	// Publish
-	_ = s.redisStore.PublishEvent(ctx, gameID, map[string]any{
-		"type":    "player_joined",
-		"player":  g.Players[seat],
-		"version": g.Version,
+	_ = s.redisStore.PublishEvent(ctx, gameID, GameEvent{
+		Type:    EventTypePlayerJoined,
+		Seat:    &seat,
+		Version: g.Version,
 	})
 
 	seated := 0
@@ -196,11 +196,11 @@ func (s *Game) JoinGame(ctx context.Context, gameID, playerID, playerName string
 		}
 	}
 
-	_ = s.redisStore.PublishEvent(ctx, "lobby_events", map[string]any{
-		"type":           "game_joined",
-		"game_id":        gameID,
-		"players_seated": seated,
-		"max_players":    g.NumSeatsPublic(),
+	_ = s.redisStore.PublishEvent(ctx, "lobby_events", LobbyEvent{
+		Type:          EventTypeGameJoined,
+		GameID:        gameID,
+		PlayersSeated: seated,
+		MaxPlayers:    g.NumSeatsPublic(),
 	})
 
 	return g, nil
@@ -285,18 +285,15 @@ func (s *Game) ProcessMove(ctx context.Context, gameID, playerID string, moveTyp
 		return nil, fmt.Errorf("failed to save move in db: %w", err)
 	}
 
-	// 7. Publish
-	_ = s.redisStore.PublishEvent(ctx, gameID, map[string]any{
-		"type":       "move",
-		"move_type":  moveType,
-		"player_id":  playerID,
-		"payload":    payload,
-		"version":    g.Version,
-		"game_state": g, // send full state or delta? Full state is safer but heavier.
-		// Architecture said: "Client must refresh state"?
-		// Pub/Sub usually sends delta or "Something changed, fetch new state".
-		// Or sends the event.
-		// We can send the event.
+	// 7. Publish. The move payload is deliberately absent: for a discard it
+	// holds the declarer's three cards, and no client reads it. Full state
+	// rides along here and is redacted per-connection at the socket edge.
+	_ = s.redisStore.PublishEvent(ctx, gameID, GameEvent{
+		Type:      EventTypeMove,
+		MoveType:  moveType,
+		PlayerID:  playerID,
+		Version:   g.Version,
+		GameState: g,
 	})
 
 	return g, nil

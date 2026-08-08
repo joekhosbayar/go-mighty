@@ -241,14 +241,18 @@ func (s *Store) PublishEvent(ctx context.Context, gameID string, event any) (err
 			Str("op", "PublishEvent").
 			Str("channel", channel)
 
-		// Try to extract event type from map if it exists
-		if eventMap, ok := event.(map[string]any); ok {
-			if eventType, hasType := eventMap["type"]; hasType {
+		// Typed envelopes (service.GameEvent, service.LobbyEvent) report their
+		// logical name; the map branch remains for any untyped caller.
+		switch e := event.(type) {
+		case interface{ EventType() string }:
+			logEvent = logEvent.Str("event_type", e.EventType())
+		case map[string]any:
+			if eventType, hasType := e["type"]; hasType {
 				logEvent = logEvent.Interface("event_type", eventType)
 			} else {
 				logEvent = logEvent.Str("event_type", fmt.Sprintf("%T", event))
 			}
-		} else {
+		default:
 			logEvent = logEvent.Str("event_type", fmt.Sprintf("%T", event))
 		}
 

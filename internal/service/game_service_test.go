@@ -171,13 +171,16 @@ func TestCreateGamePublishesLobbyEvent(t *testing.T) {
 	}
 
 	foundLobbyEvent := false
+
 	for _, evt := range fakeStore.publishedEvents {
-		if evt.channel == "lobby_events" {
-			m, ok := evt.payload.(map[string]any)
-			if ok && m["type"] == "game_created" && m["game"] == g {
-				foundLobbyEvent = true
-				break
-			}
+		if evt.channel != "lobby_events" {
+			continue
+		}
+
+		e, ok := evt.payload.(LobbyEvent)
+		if ok && e.Type == EventTypeGameCreated && e.Game != nil && e.Game.ID == g.ID {
+			foundLobbyEvent = true
+			break
 		}
 	}
 
@@ -212,39 +215,45 @@ func TestJoinGamePublishesLobbyEvent(t *testing.T) {
 		t.Fatalf("JoinGame failed: %v", err)
 	}
 
-	var lobbyEvent map[string]any
-	var gameEvent map[string]any
+	var lobbyEvent LobbyEvent
+
+	var gameEvent GameEvent
 
 	for _, evt := range fakeStore.publishedEvents {
 		if evt.channel == "lobby_events" {
-			if m, ok := evt.payload.(map[string]any); ok {
-				lobbyEvent = m
+			if e, ok := evt.payload.(LobbyEvent); ok {
+				lobbyEvent = e
 			}
 		}
+
 		if evt.channel == "game-join-lobby" {
-			if m, ok := evt.payload.(map[string]any); ok {
-				gameEvent = m
+			if e, ok := evt.payload.(GameEvent); ok {
+				gameEvent = e
 			}
 		}
 	}
 
-	if gameEvent == nil || gameEvent["type"] != "player_joined" {
+	if gameEvent.Type != EventTypePlayerJoined {
 		t.Fatalf("expected player_joined event on game channel, got %+v", gameEvent)
 	}
 
-	if lobbyEvent == nil || lobbyEvent["type"] != "game_joined" {
+	if gameEvent.Seat == nil || *gameEvent.Seat != 1 {
+		t.Errorf("expected seat 1 on player_joined, got %+v", gameEvent.Seat)
+	}
+
+	if lobbyEvent.Type != EventTypeGameJoined {
 		t.Fatalf("expected game_joined event on lobby_events channel, got %+v", lobbyEvent)
 	}
 
-	if lobbyEvent["game_id"] != "game-join-lobby" {
-		t.Errorf("expected game_id game-join-lobby, got %v", lobbyEvent["game_id"])
+	if lobbyEvent.GameID != "game-join-lobby" {
+		t.Errorf("expected game_id game-join-lobby, got %v", lobbyEvent.GameID)
 	}
 
-	if lobbyEvent["players_seated"] != 2 {
-		t.Errorf("expected players_seated 2, got %v", lobbyEvent["players_seated"])
+	if lobbyEvent.PlayersSeated != 2 {
+		t.Errorf("expected players_seated 2, got %v", lobbyEvent.PlayersSeated)
 	}
 
-	if lobbyEvent["max_players"] != 5 {
-		t.Errorf("expected max_players 5, got %v", lobbyEvent["max_players"])
+	if lobbyEvent.MaxPlayers != 5 {
+		t.Errorf("expected max_players 5, got %v", lobbyEvent.MaxPlayers)
 	}
 }

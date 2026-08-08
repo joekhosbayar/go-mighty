@@ -157,9 +157,25 @@ func (h *Handler) LobbyWSHandler(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					return
 				}
+
+				var ev service.LobbyEvent
+				if err := json.Unmarshal([]byte(msg.Payload), &ev); err != nil {
+					obs.Log(r.Context()).Error().Err(err).Msg("Dropping unparseable lobby event")
+
+					continue
+				}
+
+				out, err := json.Marshal(ev)
+				if err != nil {
+					obs.Log(r.Context()).Error().Err(err).Msg("Dropping unencodable lobby event")
+
+					continue
+				}
+
 				wsWriteMu.Lock()
-				err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+				err = conn.WriteMessage(websocket.TextMessage, out)
 				wsWriteMu.Unlock()
+
 				if err != nil {
 					return
 				}

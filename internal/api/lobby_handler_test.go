@@ -126,6 +126,8 @@ func TestListGamesHandler_Success(t *testing.T) {
 		WillReturnRows(rows)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games?status=waiting", nil)
+	req.Header.Set("Authorization", "Bearer "+generateValidToken("player-1", "alice"))
+
 	rec := httptest.NewRecorder()
 
 	handler.ListGamesHandler(rec, req)
@@ -149,6 +151,59 @@ func TestListGamesHandler_Success(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+// nilElementGameService returns a games slice with a nil element mixed in
+// among real games. ListGamesByStatus never actually does this - Redis
+// misses are filtered out before the slice is returned - but ListGamesHandler
+// should not rely on that as its only defense: a nil g.ViewFor(claims.UserID)
+// call returns nil, and a nil element in a []*game.GameView JSON-encodes as
+// `null`, which the lobby UI would crash on dereferencing `.id`.
+type nilElementGameService struct{ busyGameService }
+
+func (nilElementGameService) ListGamesByStatus(_ context.Context, _ game.Phase) ([]*game.Game, error) {
+	return []*game.Game{nil, {ID: testGameID, Status: game.PhaseWaiting}, nil}, nil
+}
+
+func TestListGamesHandler_SkipsNilGames(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(nilElementGameService{}, &fakeValidator{claims: &service.AuthClaims{UserID: "player-1", Username: "alice"}})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games?status=waiting", nil)
+	req.Header.Set("Authorization", "Bearer "+generateValidToken("player-1", "alice"))
+
+	rec := httptest.NewRecorder()
+
+	handler.ListGamesHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d. Body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	// Decode one level at a time: a real GameView legitimately marshals several
+	// nil fields as `null` (e.g. current_bid, empty seats), so the property
+	// under test is specifically that no top-level array *element* is null,
+	// not that the string "null" is absent from the body.
+	var raw []json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("failed to decode response as an array: %v", err)
+	}
+
+	for i, elem := range raw {
+		if strings.TrimSpace(string(elem)) == "null" {
+			t.Fatalf("nil game leaked into the response as array element %d: %s", i, rec.Body.String())
+		}
+	}
+
+	var resp []*game.GameView
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp) != 1 || resp[0] == nil || resp[0].ID != testGameID {
+		t.Fatalf("expected exactly the one real game, got %+v", resp)
 	}
 }
 
@@ -180,6 +235,8 @@ func TestListGamesHandler_InvalidStatus(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games?status=unknown", nil)
+	req.Header.Set("Authorization", "Bearer "+generateValidToken("player-1", "alice"))
+
 	rec := httptest.NewRecorder()
 
 	handler.ListGamesHandler(rec, req)

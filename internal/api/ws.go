@@ -297,9 +297,33 @@ func (h *Handler) WSHandler(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					return // pubsub closed
 				}
-				// msg.Payload is the JSON string from Redis
+
+				// The relay is deliberately not a passthrough. Decoding into
+				// the envelope type and re-encoding is what makes redaction
+				// unavoidable: a field a future publisher adds but does not
+				// declare on GameEvent is dropped here rather than leaked.
+				var ev service.GameEvent
+				if err := json.Unmarshal([]byte(msg.Payload), &ev); err != nil {
+					obs.Log(r.Context()).Error().
+						Str("game_id", gameID).
+						Err(err).
+						Msg("Dropping unparseable game event")
+
+					continue
+				}
+
+				out, err := json.Marshal(ev.RedactFor(claims.UserID))
+				if err != nil {
+					obs.Log(r.Context()).Error().
+						Str("game_id", gameID).
+						Err(err).
+						Msg("Dropping unencodable game event")
+
+					continue
+				}
+
 				wsWriteMu.Lock()
-				err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+				err = conn.WriteMessage(websocket.TextMessage, out)
 				wsWriteMu.Unlock()
 
 				if err != nil {
