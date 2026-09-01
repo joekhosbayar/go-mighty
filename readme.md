@@ -18,42 +18,39 @@ The server is a single Go binary with a strictly layered dependency graph: HTTP/
 
 ```mermaid
 graph TB
-    subgraph clients["Clients"]
-        Browser["Web client<br/>(React, AWS Amplify)"]
+    Browser["Web client, React on AWS Amplify"]
+    Caddy["Caddy ingress: TLS, CORS, reverse proxy"]
+
+    subgraph Server["Mighty server, one Go process"]
+        Api["internal/api: HTTP and WebSocket edge"]
+        Svc["internal/service: orchestration"]
+        Engine["internal/game: pure rules engine"]
+        Obs["internal/obs: traces, metrics, logs"]
     end
 
-    subgraph edge["Ingress"]
-        Caddy["Caddy<br/>TLS + CORS + reverse proxy"]
+    subgraph Stores["State"]
+        Redis["Redis: hot game state, locks, pub/sub"]
+        Postgres["PostgreSQL: move ledger, users, stats"]
     end
 
-    subgraph app["Mighty server (single Go process)"]
-        API["internal/api<br/>HTTP + WebSocket edge<br/>auth ctx, rate limits, redaction"]
-        SVC["internal/service<br/>orchestration: locking, versioning,<br/>persistence, event publishing"]
-        GAME["internal/game<br/>pure rules engine<br/>(no I/O)"]
-        OBS["internal/obs<br/>traces, metrics, logs"]
+    subgraph Managed["External services"]
+        Cognito["Amazon Cognito identity provider"]
+        GrafanaCloud["Grafana Cloud via Alloy"]
     end
 
-    subgraph state["State"]
-        Redis[("Redis<br/>hot game state, locks, pub/sub")]
-        PG[("PostgreSQL<br/>move ledger, users, stats")]
-    end
-
-    subgraph ext["External services"]
-        Cognito["Amazon Cognito<br/>identity provider"]
-        Grafana["Grafana Cloud<br/>via Alloy (OTLP)"]
-    end
-
-    Browser -->|"HTTPS / WSS"| Caddy
-    Caddy --> API
-    API --> SVC
-    SVC --> GAME
-    SVC --> Redis
-    SVC --> PG
-    API -->|"JWT verification"| Cognito
-    API -.-> OBS
-    SVC -.-> OBS
-    OBS -->|"OTLP"| Grafana
+    Browser --> Caddy
+    Caddy --> Api
+    Api --> Svc
+    Svc --> Engine
+    Svc --> Redis
+    Svc --> Postgres
+    Api --> Cognito
+    Api -.-> Obs
+    Svc -.-> Obs
+    Obs --> GrafanaCloud
 ```
+
+Client traffic arrives over HTTPS and WSS; `internal/api` verifies Cognito-issued JWTs; `internal/obs` exports over OTLP.
 
 The same architecture, split by concern, is described below as three planes.
 
@@ -63,39 +60,51 @@ The control plane decides **who may do what**. It owns identity, admission, life
 
 ```mermaid
 graph LR
-    subgraph identity["Identity & admission"]
-        JWT["JWT verification<br/>internal/service/cognito_auth.go"]
-        Attrs["Cognito attribute fetch<br/>internal/infra/cognito_client.go"]
-        Upsert["User upsert by cognito_sub<br/>internal/store/postgres"]
+    Client["Client request"]
+
+    subgraph Guards["Safeguards in internal/api"]
+        Origin["Origin allow-list, hardening.go"]
+        BodyCap["Body size limit, hardening.go"]
+        ClientIp["Trusted-proxy client IP, clientip.go"]
+        UserRate["Per-user token bucket, ratelimit_middleware.go"]
+        ConnCap["Per-user and per-IP conn caps, connlimit.go"]
     end
 
-    subgraph guards["Safeguards (internal/api)"]
-        Origin["Origin allow-list<br/>hardening.go"]
-        Body["Body size limits<br/>hardening.go"]
-        RL["Per-user token bucket<br/>ratelimit_middleware.go"]
-        Conns["Per-user / per-IP conn caps<br/>connlimit.go"]
-        IP["Trusted-proxy client IP<br/>clientip.go"]
+    subgraph Identity["Identity"]
+        Verify["JWT verification, service/cognito_auth.go"]
+        Attrs["Cognito attribute fetch, infra/cognito_client.go"]
+        Upsert["User upsert by cognito_sub, store/postgres"]
     end
 
-    subgraph lifecycle["Lifecycle"]
+    subgraph Lifecycle["Lifecycle surface"]
         Create["POST /games"]
-        Join["POST /games/{id}/join"]
+        Join["POST /games/id/join"]
         List["GET /games"]
         Lobby["GET /lobby/ws"]
         Health["GET /healthz"]
     end
 
-    subgraph infraops["Infrastructure control"]
-        TF["Terraform<br/>deploy/terraform"]
-        SSM["SSM Run Command<br/>deploy/scripts/deploy.sh"]
+    subgraph InfraOps["Infrastructure control"]
+        Terraform["Terraform, deploy/terraform"]
+        Ssm["SSM Run Command, deploy/scripts/deploy.sh"]
     end
 
-    Client(["Client"]) --> Origin --> IP --> RL --> Conns --> JWT
-    JWT --> Attrs --> Upsert
-    JWT --> lifecycle
-    Body --> RL
-    infraops -.->|"provisions / configures"| guards
+    Client --> Origin
+    Origin --> BodyCap
+    BodyCap --> ClientIp
+    ClientIp --> UserRate
+    UserRate --> ConnCap
+    ConnCap --> Verify
+    Verify --> Attrs
+    Attrs --> Upsert
+    Verify --> Create
+    Verify --> Join
+    Verify --> Lobby
+    Terraform -.-> Origin
+    Ssm -.-> UserRate
 ```
+
+`GET /games` and `GET /healthz` are unauthenticated; Terraform and SSM configure the safeguard values the edge enforces.
 
 Control-plane responsibilities:
 
@@ -116,27 +125,26 @@ The data plane moves **game state and events**. Redis is the source of truth for
 
 ```mermaid
 sequenceDiagram
-    autonumber
     participant C as Client
-    participant WS as internal/api (ws.go)
-    participant S as internal/service (GameService)
-    participant G as internal/game (rules)
+    participant WS as internal/api ws.go
+    participant S as internal/service GameService
+    participant G as internal/game rules
     participant R as Redis
     participant P as Postgres
 
-    C->>WS: move (with client_version)
-    WS->>S: ProcessMove(userID, gameID, move)
-    S->>R: AcquireLock(gameID)
-    S->>R: LoadGame(gameID)
-    S->>G: ValidateMove + ApplyMove
-    G-->>S: mutated state (pure, in-memory)
-    S->>R: SaveGame(state, expectedVersion) [CAS]
-    S->>P: SaveMove(ledger append)
-    S->>R: PublishEvent(GameEvent, full state)
-    S->>R: ReleaseLock(gameID, token)
+    C->>WS: move carrying client_version
+    WS->>S: ProcessMove
+    S->>R: AcquireLock
+    S->>R: LoadGame
+    S->>G: ValidateMove then ApplyMove
+    G-->>S: mutated state, pure and in-memory
+    S->>R: SaveGame with compare-and-set on version
+    S->>P: SaveMove, ledger append
+    S->>R: PublishEvent with full state
+    S->>R: ReleaseLock, token-checked
     R-->>WS: pub/sub delivery to every subscriber
-    WS->>WS: GameEvent.RedactFor(viewerID) -> OutgoingGameEvent
-    WS-->>C: per-player GameView (opponents' hands stripped)
+    WS->>WS: RedactFor viewerID
+    WS-->>C: per-player GameView, other hands stripped
 ```
 
 Data-plane invariants:
@@ -158,47 +166,45 @@ The compute plane is **where code executes**. One Go binary, containerized, behi
 
 ```mermaid
 graph TB
-    subgraph dev["Developer machine"]
-        Build["docker buildx<br/>--platform linux/arm64"]
+    subgraph Local["Developer machine"]
+        Build["docker buildx, platform linux/arm64"]
         Deploy["deploy/scripts/deploy.sh"]
     end
 
-    subgraph aws["AWS"]
-        ECR["Amazon ECR<br/>mighty:latest (arm64)"]
-        S3["Amazon S3<br/>compose files + migrations"]
-        SSM["AWS Systems Manager<br/>Run Command + Parameter Store"]
-
-        subgraph ec2["EC2 (Graviton) — docker compose"]
-            CaddyC["caddy<br/>TLS termination, CORS"]
-            MightyC["mighty<br/>Go server :8080"]
-            MigrateC["migrate<br/>one-shot schema apply"]
-            RedisC["redis:7-alpine"]
-            PGC["postgres:16"]
-            AlloyC["grafana/alloy<br/>OTLP + logs + host metrics"]
-        end
-
-        Amplify["AWS Amplify<br/>React frontend"]
-        CognitoS["Cognito user pool"]
+    subgraph Cloud["AWS control services"]
+        Ecr["Amazon ECR, mighty:latest arm64"]
+        S3["Amazon S3, compose files and migrations"]
+        Ssm["Systems Manager, Run Command and Parameter Store"]
+        Amplify["AWS Amplify, React frontend"]
+        CognitoPool["Cognito user pool"]
     end
 
-    GrafanaCloud["Grafana Cloud<br/>Tempo / Prometheus / Loki"]
+    subgraph Host["EC2 Graviton instance, docker compose"]
+        CaddyC["caddy, TLS termination and CORS"]
+        MightyC["mighty, Go server on 8080"]
+        MigrateC["migrate, one-shot schema apply"]
+        RedisC["redis:7-alpine"]
+        PostgresC["postgres:16"]
+        AlloyC["grafana/alloy, OTLP and logs and host metrics"]
+    end
 
-    Build --> ECR
+    GrafanaCloud["Grafana Cloud, Tempo and Prometheus and Loki"]
+
+    Build --> Ecr
     Deploy --> S3
-    Deploy --> SSM
-    SSM -->|"remote-deploy.sh"| ec2
-    ECR -->|"docker pull"| MightyC
-    S3 --> ec2
-    SSM -->|"secrets -> .env"| ec2
-
+    Deploy --> Ssm
+    Ssm --> MightyC
+    Ssm --> AlloyC
+    S3 --> MigrateC
+    Ecr --> MightyC
+    Amplify --> CaddyC
     CaddyC --> MightyC
-    MigrateC --> PGC
+    MigrateC --> PostgresC
     MightyC --> RedisC
-    MightyC --> PGC
-    MightyC -->|"OTLP"| AlloyC
+    MightyC --> PostgresC
+    MightyC --> AlloyC
+    MightyC --> CognitoPool
     AlloyC --> GrafanaCloud
-    MightyC -->|"JWKS / attributes"| CognitoS
-    Amplify -->|"HTTPS/WSS"| CaddyC
 ```
 
 Compute-plane characteristics:
@@ -218,63 +224,65 @@ Dependencies point strictly downward, and the graph below reflects the actual im
 
 ```mermaid
 graph TD
-    MAIN["cmd/server<br/>main.go — wiring, config, router, lifecycle"]
+    Main["cmd/server: wiring, config, router, lifecycle"]
 
-    subgraph edge["Edge layer"]
-        API["internal/api<br/>handler.go · ws.go · lobby_ws.go<br/>authctx.go · hardening.go · connlimit.go<br/>ratelimit_middleware.go · clientip.go · health.go"]
+    subgraph EdgeLayer["Edge layer"]
+        Api["internal/api: handlers, websockets, hardening"]
     end
 
-    subgraph orchestration["Orchestration layer"]
-        SVC["internal/service<br/>game_service.go · cognito_auth.go · events.go"]
+    subgraph OrchestrationLayer["Orchestration layer"]
+        Svc["internal/service: game_service, cognito_auth, events"]
     end
 
-    subgraph domain["Domain layer (pure)"]
-        GAME["internal/game<br/>game.go · rules.go · card.go<br/>view.go · config.go · features/*.feature"]
+    subgraph DomainLayer["Domain layer, pure"]
+        Engine["internal/game: game, rules, card, view, config"]
     end
 
-    subgraph persistence["Persistence layer"]
-        SR["internal/store/redis<br/>hot state, locks, pub/sub"]
-        SP["internal/store/postgres<br/>ledger, users, stats"]
+    subgraph PersistenceLayer["Persistence layer"]
+        StoreRedis["internal/store/redis: hot state, locks, pub/sub"]
+        StorePostgres["internal/store/postgres: ledger, users, stats"]
     end
 
-    subgraph crosscut["Cross-cutting"]
-        INFRA["internal/infra<br/>redis_client · postgres_client · cognito_client"]
-        RATE["internal/ratelimit<br/>limiter.go (Redis Lua) · bucket.go (in-process)"]
-        OBSP["internal/obs<br/>trace.go · metrics.go · log.go"]
+    subgraph CrossCutting["Cross-cutting"]
+        Infra["internal/infra: redis, postgres, cognito clients"]
+        Rate["internal/ratelimit: limiter and bucket"]
+        Obs["internal/obs: trace, metrics, log"]
     end
 
-    subgraph outside["Non-Go assets"]
-        MIG["migrations/<br/>versioned SQL"]
-        DEP["deploy/<br/>terraform · compose · scripts"]
-        DOC["docs/<br/>API · rules · observability · openapi"]
-        E2E["tests/e2e<br/>Gherkin feature suites"]
+    subgraph Assets["Non-Go assets"]
+        Migrations["migrations: versioned SQL"]
+        DeployDir["deploy: terraform, compose, scripts"]
+        Docs["docs: API, rules, observability, openapi"]
+        E2ETests["tests/e2e: Gherkin feature suites"]
     end
 
-    MAIN --> API
-    MAIN --> SVC
-    MAIN --> INFRA
-    MAIN --> RATE
-    MAIN --> OBSP
-    MAIN --> SR
-    MAIN --> SP
+    Main --> Api
+    Main --> Svc
+    Main --> Infra
+    Main --> Rate
+    Main --> Obs
+    Main --> StoreRedis
+    Main --> StorePostgres
 
-    API --> SVC
-    API --> RATE
-    API --> GAME
-    API --> OBSP
+    Api --> Svc
+    Api --> Rate
+    Api --> Engine
+    Api --> Obs
 
-    SVC --> GAME
-    SVC --> SR
-    SVC --> SP
-    SVC --> OBSP
+    Svc --> Engine
+    Svc --> StoreRedis
+    Svc --> StorePostgres
+    Svc --> Obs
 
-    SR --> GAME
-    SP --> GAME
+    StoreRedis --> Engine
+    StorePostgres --> Engine
 
-    E2E -.->|"exercises"| API
-    MIG -.->|"defines schema for"| SP
-    DEP -.->|"runs"| MAIN
+    E2ETests -.-> Api
+    Migrations -.-> StorePostgres
+    DeployDir -.-> Main
 ```
+
+Solid edges are Go import edges; dashed edges are the non-Go assets that exercise, define, or ship the packages they point at.
 
 | Package | Responsibility | Rule of thumb |
 | --- | --- | --- |
